@@ -8,10 +8,11 @@ from plotly.subplots import make_subplots
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from db_handler import  *
+from db_utils import sync_sde_db, sync_db
 from sync_scheduler import initialize_sync_state, check_sync_status
 from logging_config import setup_logging
-from db_utils import sync_db
 import millify
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -24,8 +25,8 @@ logger.info("Application started")
 mkt_url = st.secrets["TURSO_DATABASE_URL"]
 mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
 
-sde_url = st.secrets["SDE_URL"]
-sde_auth_token = st.secrets["SDE_AUTH_TOKEN"]
+sde_url = st.secrets["NEW_SDE_URL"]
+sde_auth_token = st.secrets["NEW_SDE_AUTH_TOKEN"]
 
 # Function to schedule daily database sync at 1300 UTC
 
@@ -391,10 +392,56 @@ def main():
         initialize_sync_state()
 
     # Check for sync needs using cached function
-    logger.info("Checking sync status")
+    logger.info("Checking database files")
+    logger.info(f"Checking {local_mkt_path}")
+    print(f"Checking databases")
 
+    if not check_db_exists(local_mkt_path):
+        logger.info(f"Database file {local_mkt_path} does not exist ❌")
+        print(f"Database file {local_mkt_path} does not exist ❌")
+        print(f"Syncing database")
+        sync_db()
+        logger.info(f"Synced database, sleeping for 10 seconds")
+        time.sleep(10)
+        logger.info(f"Slept 10 seconds. Now, checking database file {local_mkt_path} again")
+    else:
+        logger.info(f"Database file {local_mkt_path} exists ✅")
+
+    logger.info(f"Checking {local_sde_path}")
+
+    if not check_db_exists(local_sde_path):
+        logger.info(f"Database file {local_sde_path} does not exist ❌")
+        print(f"Database file {local_sde_path} does not exist ❌")
+        print(f"Syncing SDE database 🔄")
+        if not sync_sde_db():
+            logger.error("SDE database sync failed 🌋")
+            print(f"SDE database sync failed 🌋")
+            st.error("SDE database sync failed, please try again later")
+            st.stop()
+        else:
+            logger.info("SDE database sync succeeded ✅")
+            print(f"SDE database sync succeeded ✅")
+        logger.info(f"Synced SDE database, sleeping for 10 seconds")
+        time.sleep(10)
+        logger.info(f"Slept 10 seconds. Now, checking database file {local_sde_path} again")
+    else:
+        logger.info(f"Database file {local_sde_path} exists ✅")
+    
+    print(f"Databases checked")
+    if check_db_exists(local_mkt_path) and check_db_exists(local_sde_path):
+        print(f"Databases checked:")
+        print(f"Market database: ✅")
+        print(f"SDE database: ✅")
+        logger.info("Databases checks passed ✅")
+    else:
+        print(f"database creation failed 🌋")
+        logger.error("Database creation failed 🌋")
+        st.error("Database creation failed, please try again later")
+        st.stop()
+
+    logger.info("Checking sync status")
     if check_sync_status():
-        logger.info("Sync needed, syncing now")
+        logger.info("Sync needed, syncing now 🔄")
         sync_db()
         st.session_state.sync_status = "Success"
         st.session_state.update_time = get_update_time()
@@ -455,8 +502,16 @@ def main():
         st.sidebar.text(f"Item: {selected_item}")
     
     logger.info(f"Selected item: {selected_item}")
+
+
+
     # Main content
-    sell_data, buy_data, stats = get_market_data(show_all, selected_categories, selected_items)
+    try:    
+        sell_data, buy_data, stats = get_market_data(show_all, selected_categories, selected_items)
+    except Exception as e:
+        logger.error(f"Error getting market data: {e}")
+        st.error("Error getting market data, please try again later")
+        st.stop()
     
     # Process sell orders
     sell_order_count = 0

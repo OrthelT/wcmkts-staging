@@ -16,7 +16,7 @@ from db_handler import get_local_mkt_engine, get_update_time
 from doctrines import create_fit_df
 import libsql_experimental as libsql
 
-mktdb = "wcmkt.db"
+mktdb = "wcmkt2.db"
 
 # Insert centralized logging configuration
 logger = setup_logging(__name__, log_file="doctrine_status.log")

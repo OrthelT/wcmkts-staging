@@ -13,11 +13,16 @@ import datetime
 from db_utils import sync_db
 import json
 import libsql_experimental as libsql
+import pathlib
 
 # Database URLs
-local_mkt_url = "sqlite+libsql:///wcmkt.db"  # Changed to standard SQLite format for local dev
-local_sde_url = "sqlite+libsql:///sde.db"    # Changed to standard SQLite format for local dev
+local_mkt_url = "sqlite+libsql:///wcmkt2.db"  # Changed to standard SQLite format for local dev
+local_sde_url = "sqlite+libsql:///sde2.db"    # Changed to standard SQLite format for local dev
 build_cost_url = "sqlite+libsql:///build_cost.db"
+local_mkt_path = pathlib.Path("wcmkt2.db")
+local_sde_path = pathlib.Path("sde2.db")
+local_build_cost_path = pathlib.Path("build_cost.db")
+
 # Load environment variables
 logger = setup_logging(__name__)
 
@@ -25,9 +30,17 @@ logger = setup_logging(__name__)
 mkt_url = st.secrets["TURSO_DATABASE_URL"]
 mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
 
-sde_url = st.secrets["SDE_URL"]
-sde_auth_token = st.secrets["SDE_AUTH_TOKEN"]
+sde_url = st.secrets["NEW_SDE_URL"]
+sde_auth_token = st.secrets["NEW_SDE_AUTH_TOKEN"]
 
+def check_db_exists(db_path):
+    if not db_path.exists():
+        print(f"Database file {db_path} does not exist, syncing database")
+        return False
+    else:
+        logger.info(f"Database file exists: {db_path}")
+        print(f"Database file exists: {db_path}")
+        return True
 
 mkt_query = """
     SELECT * FROM marketorders 
@@ -431,4 +444,5 @@ def fix_duplicate_structures():
         print("Duplicate structures have been fixed")
 
 if __name__ == "__main__":
-    print(get_time_until_next_update())
+    print(local_mkt_path)
+    check_db_exists(local_mkt_path)
