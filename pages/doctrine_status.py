@@ -17,6 +17,7 @@ from doctrines import create_fit_df
 import libsql_experimental as libsql
 
 from proj_config import local_mkt_path
+local_mkt_path_str = str(local_mkt_path)
 
 # Insert centralized logging configuration
 logger = setup_logging(__name__, log_file="doctrine_status.log")
@@ -24,7 +25,7 @@ logger = setup_logging(__name__, log_file="doctrine_status.log")
 @st.cache_resource(ttl=600, show_spinner="Loading libsql connection...")
 def get_libsql_connection():
     """Get a connection to the libsql database"""
-    return libsql.connect(local_mkt_path)
+    return libsql.connect(local_mkt_path_str)
 
 @st.cache_data(ttl=600, show_spinner="Loading cacheddoctrine fits...")
 def get_fit_summary():
@@ -34,7 +35,7 @@ def get_fit_summary():
     # Get the raw data with all fit details
     all_fits_data, _ = create_fit_df()
     
-    if all_fits_data.empty:
+    if all_fits_data.empty: 
         return pd.DataFrame()
     
     # Get unique fit_ids
