@@ -1,3 +1,8 @@
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
 
 from sqlalchemy import text
@@ -6,12 +11,13 @@ import plotly.express as px
 from sqlalchemy.orm import Session
 
 from logging_config import setup_logging
+from proj_config import local_mkt_path, local_sde_path
 
 # Insert centralized logging configuration
 logger = setup_logging(__name__)
 
 # Import from the root directory
-from db_handler import get_local_mkt_engine, get_update_time, safe_format
+from db_handler import get_local_mkt_engine, get_esi_update_time
 
 def get_filter_options(selected_categories=None):
     try:
@@ -262,7 +268,7 @@ def main():
 
     # Display last update timestamp
     st.sidebar.markdown("---")
-    st.sidebar.write(f"Last ESI update: {get_update_time()}")
+    st.sidebar.write(f"Last ESI update: {get_esi_update_time()}")
 
 if __name__ == "__main__":
     main()

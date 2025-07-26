@@ -1,8 +1,6 @@
 import datetime as dt
 import json
-import os
-import time
-import threading
+
 import streamlit as st
 from logging_config import setup_logging
 
@@ -10,76 +8,81 @@ from logging_config import setup_logging
 logger = setup_logging(__name__)
 
 sync_file = "last_sync_state.json"
-
 with open(sync_file, "r") as f:
     saved_sync_state = json.load(f)
 
-last_saved_sync = dt.datetime.strptime(saved_sync_state['last_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
-next_saved_sync = dt.datetime.strptime(saved_sync_state['next_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
-
 
 def initialize_sync_state():
-    if 'sync_status' not in st.session_state:
-        st.session_state.sync_status = "Not yet run"
-    if st.session_state.get('last_sync') is None:
-        st.session_state['last_sync'] = last_saved_sync
-    if st.session_state.get('next_sync') is None:
-        st.session_state['next_sync'] = next_saved_sync
+    last_saved_sync = dt.datetime.strptime(saved_sync_state['last_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
+    next_saved_sync = dt.datetime.strptime(saved_sync_state['next_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
 
-#cache for 15 minutes
-@st.cache_data(ttl=900)
+    print(last_saved_sync)
+    print(f"next_sync: {next_saved_sync}")
+
+    logger.info("session state sync_status not found, initializing")
+    st.session_state.sync_status = "Not yet run"
+    logger.info(f"sync_status initialized to: {st.session_state.sync_status}")
+
+    st.session_state['last_sync'] = last_saved_sync
+    st.session_state['next_sync'] = next_saved_sync
+
+    logger.info(f"sync_status: {st.session_state.sync_status}")
+    logger.info(f"last_sync: {st.session_state.last_sync}")
+    logger.info(f"next_sync: {st.session_state.next_sync}")
+
+def get_next_sync():
+    with open(sync_file, "r") as f:
+        saved_sync_state = json.load(f)
+
+    stimes = saved_sync_state['sync_times']
+    now = dt.datetime.now(dt.UTC)
+  
+    yt = [dt.datetime.strptime(t, "%H:%M").replace(tzinfo=dt.UTC, day=now.day, month=now.month, year=now.year) for t in stimes]
+    future = [t for t in yt if t > now]
+
+    next_sync = min(future)
+    return next_sync
+
 def check_sync_status():
     """Check if a sync is needed based on the next scheduled sync time"""
     now = dt.datetime.now(dt.UTC)
     
     # If we don't have a last sync time, we should sync
     if not st.session_state.get('last_sync'):
+        logger.info("check_sync_status: last_sync not found in session state, syncing")
         return True
         
     # If we've passed the next sync time, we should sync
     if now >= st.session_state.next_sync:
+        logger.info("check_sync_status: now >= next_sync, syncing")
         return True
         
     # If we're within 1 minute of the next sync time, we should sync
     time_to_next = st.session_state.next_sync - now
     if time_to_next.total_seconds() <= 60:
+        logger.info("check_sync_status: time_to_next <= 60, syncing")
         return True
     
+    logger.info("check_sync_status: no sync needed")
     return False
 
-def schedule_next_sync(last_sync: dt.datetime) -> dt.datetime:
-    """Schedule the next sync based on the sync times in last_sync_state.json"""
-    now = dt.datetime.now(dt.UTC)
-    sync_times = saved_sync_state['sync_times']
+def update_sync_status(sync_status:str):
+    st.session_state.sync_status = sync_status
+    st.session_state.last_sync = dt.datetime.now(dt.UTC)
+    st.session_state.next_sync = get_next_sync()
+
+    updated_sync_state = {
+        "last_sync": st.session_state.last_sync.strftime("%Y-%m-%d %H:%M %Z"),
+        "next_sync": st.session_state.next_sync.strftime("%Y-%m-%d %H:%M %Z")   ,
+        "sync_status": st.session_state.sync_status,
+        "sync_times": saved_sync_state['sync_times']
+    }
+
+    logger.info(f"updated_sync_state: {updated_sync_state}")
+    logger.info(f"sync_file: {sync_file}")
     
-    # Convert sync times to today's datetime objects
-    today_sync_times = []
-    for time_str in sync_times:
-        hour, minute = map(int, time_str.split(':'))
-        sync_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        
-        # If the time is earlier in the day and we've passed it, schedule it for tomorrow
-        if sync_time < now:
-            sync_time += dt.timedelta(days=1)
-            
-        today_sync_times.append(sync_time)
-    
-    # Sort sync times
-    today_sync_times.sort()
-    
-    # Find the next sync time
-    for sync_time in today_sync_times:
-        if sync_time > now:
-            logger.info(f"Next sync time: {sync_time}, timezone: {sync_time.tzname()}")
-            return sync_time
-            
-    # If no sync times are left today, get the first time for tomorrow
-    if today_sync_times:
-        logger.info(f"No sync times left for today. Next sync time: {today_sync_times[0]}, timezone: {today_sync_times[0].tzname()}")
-        return today_sync_times[0]
-    
-    # Fallback: if no sync times defined, schedule for 3 hours from now
-    return now + dt.timedelta(hours=3)
+    with open(sync_file, "w") as f:
+        json.dump(updated_sync_state, f)
 
 if __name__ == "__main__":
     pass

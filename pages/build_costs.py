@@ -1,5 +1,7 @@
 import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from dataclasses import dataclass
 from typing import Sequence, Tuple
 import pandas as pd
@@ -9,7 +11,6 @@ import streamlit as st
 import pathlib
 import requests
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from build_cost_models import Structure, Rig, IndustryIndex
 from logging_config import setup_logging
@@ -18,8 +19,8 @@ from db_handler import get_groups_for_category, get_types_for_group, get_4H_pric
 from db_utils import update_industry_index
 import datetime
 
-build_cost_db = os.path.join("build_cost.db")
-build_cost_url = f"sqlite:///{build_cost_db}"
+from proj_config import build_cost_url
+
 valid_structures = [35827, 35825, 35826]
 
 logger = setup_logging(__name__)

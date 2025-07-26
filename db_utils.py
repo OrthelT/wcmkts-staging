@@ -4,27 +4,21 @@ from sqlalchemy import create_engine
 import streamlit as st
 import libsql
 from logging_config import setup_logging
-import json
 import time
-from sync_scheduler import schedule_next_sync
 import requests
+from sync_scheduler import update_sync_status
+
+from proj_config import local_mkt_path, local_mkt_url, mkt_url, mkt_auth_token, local_sde_path, local_sde_url, sde_url, sde_auth_token, build_cost_url
+
+local_mkt_path_string = str(local_mkt_path)
+local_sde_path_string = str(local_sde_path)
 
 logger = setup_logging(__name__)
 
-# Database URLs
-local_mkt_url = "sqlite+libsql:///wcmkt2.db"  # Changed to standard SQLite format for local dev
-local_sde_url = "sqlite+libsql:///sde.db"    # Changed to standard SQLite format for local dev
-build_cost_url = "sqlite+libsql:///build_cost.db"
+sleep_time = 0.5 #seconds
 
 
-# Use environment variables for production
-mkt_url = st.secrets["TURSO_DATABASE_URL"]
-mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
-
-sde_url = st.secrets["NEW_SDE_URL"]
-sde_auth_token = st.secrets["NEW_SDE_AUTH_TOKEN"]
-
-def sync_db(db_url="wcmkt2.db", sync_url=mkt_url, auth_token=mkt_auth_token):
+def sync_db(db_path=local_mkt_path_string, sync_url=mkt_url, auth_token=mkt_auth_token):
     logger.info("database sync started")
 
     # Clear cache of all data before syncing
@@ -32,48 +26,61 @@ def sync_db(db_url="wcmkt2.db", sync_url=mkt_url, auth_token=mkt_auth_token):
     st.cache_resource.clear()
     logger.info("cache cleared")
     
-    sleep_time = 0.5
     time.sleep(sleep_time)
     logger.info(f"cache cleared for sync; sleeping {sleep_time} seconds")
     # Give connections time to fully close
     # Skip sync in development mode or when sync_url/auth_token are not provided
     if not sync_url or not auth_token:
         logger.info("Skipping database sync in development mode or missing sync credentials")
-        
+        return False
     try:
         sync_start = time.time()
-        conn = libsql.connect(db_url, sync_url=sync_url, auth_token=auth_token)
+        conn = libsql.connect(db_path, sync_url=sync_url, auth_token=auth_token)
         logger.info("\n")
         logger.info(f"="*80)
         logger.info(f"Database sync started at {sync_start}")
         conn.sync()
         logger.info(f"Database synced in {1000*(time.time() - sync_start)} milliseconds")
+        time.sleep(sleep_time)
+        conn.close()
 
-       
+        update_sync_status("success")
+
+        logger.info("database sync completed")
+        return True
         
     except Exception as e:
         if "Sync is not supported" in str(e):
             logger.info("Skipping sync: This appears to be a local file database that doesn't support sync")
             st.session_state.sync_status = "Skipping sync: This appears to be a local file database that doesn't support sync"
+            return False
         else:
             logger.error(f"Sync failed: {str(e)}")
             st.session_state.sync_status = f"Failed: {str(e)}"
+            update_sync_status("failed")
+            return False
 
-def sync_sde_db(db_url="sde.db", sync_url=sde_url, auth_token=sde_auth_token):
+def sync_sde_db(db_url=local_sde_path_string, sync_url=sde_url, auth_token=sde_auth_token):
     logger.info("database sync started")
     sync_start = time.time()
     try:
         conn = libsql.connect(db_url, sync_url=sync_url, auth_token=auth_token)
+
         logger.info("\n")
         logger.info(f"="*80)
         logger.info(f"Database sync started at {sync_start}")
         conn.sync()
+        logger.info(f"Database synced in {1000*(time.time() - sync_start)} milliseconds")
+        time.sleep(sleep_time)
         conn.close()
+
+        logger.info("database sync completed")
+        return True
+    
     except Exception as e:
         logger.error(f"Sync failed: {str(e)}")
         return False
-    else:
-        return True
+
 
 def get_type_name(type_ids):
     engine = create_engine(local_sde_url)

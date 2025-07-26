@@ -1,5 +1,8 @@
 import os
 import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -13,22 +16,13 @@ from sync_scheduler import initialize_sync_state, check_sync_status
 from logging_config import setup_logging
 import millify
 from datetime import datetime
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from proj_config import local_mkt_path, local_sde_path  # noqa: F401
 
 # Insert centralized logging configuration
 logger = setup_logging(__name__)
 
 # Log application start
 logger.info("Application started")
-
-mkt_url = st.secrets["TURSO_DATABASE_URL"]
-mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
-
-sde_url = st.secrets["NEW_SDE_URL"]
-sde_auth_token = st.secrets["NEW_SDE_AUTH_TOKEN"]
-
-# Function to schedule daily database sync at 1300 UTC
 
 # Function to get unique categories and item names
 def get_filter_options(selected_categories=None):
@@ -343,7 +337,7 @@ def create_history_chart(type_id):
 def display_sync_status():
     """Display sync status in the sidebar."""
     
-    last_update = get_update_time()
+    last_update = get_esi_update_time()
     time_since_update = get_time_since_esi_update()
     st.sidebar.markdown(f"**Last ESI update:** {last_update} UTC {time_since_update}")
     time_until_update = get_time_until_next_update()
@@ -390,6 +384,19 @@ def main():
     # Initialize all session state variables
     if not st.session_state.get('sync_status'):
         initialize_sync_state()
+
+    
+    logger.info("Checking sync status")
+    if check_sync_status():
+        logger.info("Sync needed, syncing now 🔄")
+        sync_db()
+        st.session_state.sync_status = "Success"
+        st.session_state.update_time = get_esi_update_time()
+        logger.info(f"Sync status updated to: {st.session_state.sync_status}\n, last sync: {st.session_state.last_sync}\n, next sync: {st.session_state.next_sync}\n")
+        
+    else:
+        logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
+
 
     # Check for sync needs using cached function
     logger.info("Checking database files")
@@ -438,17 +445,6 @@ def main():
         logger.error("Database creation failed 🌋")
         st.error("Database creation failed, please try again later")
         st.stop()
-
-    logger.info("Checking sync status")
-    if check_sync_status():
-        logger.info("Sync needed, syncing now 🔄")
-        sync_db()
-        st.session_state.sync_status = "Success"
-        st.session_state.update_time = get_update_time()
-        logger.info(f"Sync status updated to: {st.session_state.sync_status}\n, last sync: {st.session_state.last_sync}\n, next sync: {st.session_state.next_sync}\n")
-        st.rerun()
-    else:
-        logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
 
     wclogo = "images/wclogo.png"
     st.image(wclogo, width=150)

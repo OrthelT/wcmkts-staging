@@ -5,33 +5,14 @@ import streamlit as st
 
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
-import pytz
 from logging_config import setup_logging
 import time
-import threading
 import datetime
-from db_utils import sync_db
 import json
-import libsql_experimental as libsql
-import pathlib
+from proj_config import local_mkt_url, local_sde_url, build_cost_url
 
-# Database URLs
-local_mkt_url = "sqlite+libsql:///wcmkt2.db"  # Changed to standard SQLite format for local dev
-local_sde_url = "sqlite+libsql:///sde2.db"    # Changed to standard SQLite format for local dev
-build_cost_url = "sqlite+libsql:///build_cost.db"
-local_mkt_path = pathlib.Path("wcmkt2.db")
-local_sde_path = pathlib.Path("sde2.db")
-local_build_cost_path = pathlib.Path("build_cost.db")
-
-# Load environment variables
 logger = setup_logging(__name__)
 
-# Use environment variables for production
-mkt_url = st.secrets["TURSO_DATABASE_URL"]
-mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
-
-sde_url = st.secrets["NEW_SDE_URL"]
-sde_auth_token = st.secrets["NEW_SDE_AUTH_TOKEN"]
 
 def check_db_exists(db_path):
     if not db_path.exists():
@@ -233,7 +214,7 @@ def get_market_history(type_id):
     """
     return pd.read_sql_query(query, (get_local_mkt_engine()))
 
-def get_update_time()->str:
+def get_esi_update_time()->str:
     query = """
         SELECT last_update FROM marketstats LIMIT 1
     """
@@ -416,7 +397,7 @@ def update_taxes(df):
         print("Taxes updated successfully")
 
 def fix_duplicate_structures():
-    engine = create_engine("sqlite:///build_cost.db")
+    engine = create_engine(build_cost_url)
     with engine.connect() as conn:
         # First, get all duplicate structures
         res = conn.execute(text("""

@@ -12,11 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from logging_config import setup_logging
-from db_handler import get_local_mkt_engine, get_update_time
+from db_handler import get_local_mkt_engine, get_esi_update_time
 from doctrines import create_fit_df
 import libsql_experimental as libsql
 
-mktdb = "wcmkt2.db"
+from proj_config import local_mkt_path
 
 # Insert centralized logging configuration
 logger = setup_logging(__name__, log_file="doctrine_status.log")
@@ -24,7 +24,7 @@ logger = setup_logging(__name__, log_file="doctrine_status.log")
 @st.cache_resource(ttl=600, show_spinner="Loading libsql connection...")
 def get_libsql_connection():
     """Get a connection to the libsql database"""
-    return libsql.connect(mktdb)
+    return libsql.connect(local_mkt_path)
 
 @st.cache_data(ttl=600, show_spinner="Loading cacheddoctrine fits...")
 def get_fit_summary():
@@ -694,7 +694,7 @@ def main():
     
     # Display last update timestamp
     st.sidebar.markdown("---")
-    st.sidebar.write(f"Last ESI update: {get_update_time()}")
+    st.sidebar.write(f"Last ESI update: {get_esi_update_time()}")
 
 
 
