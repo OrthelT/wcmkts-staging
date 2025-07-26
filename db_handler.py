@@ -9,7 +9,7 @@ from logging_config import setup_logging
 import time
 import datetime
 import json
-from proj_config import local_mkt_url, local_sde_url, build_cost_url
+from proj_config import local_mkt_url, local_sde_url, build_cost_url, local_mkt_path, local_sde_path, local_build_cost_path
 
 logger = setup_logging(__name__)
 

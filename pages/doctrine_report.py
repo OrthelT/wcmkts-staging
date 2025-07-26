@@ -11,21 +11,20 @@ import streamlit as st
 import pathlib
 from logging_config import setup_logging
 import libsql_experimental as libsql
-
+    
 from db_handler import get_local_mkt_engine, get_esi_update_time
 from doctrines import create_fit_df, get_fit_summary
 logger = setup_logging(__name__, log_file="experiments.log")
 
+local_mkt_path_str = str(local_mkt_path)
+
 icon_id = 0
 icon_url = f"https://images.evetech.net/types/{icon_id}/render?size=64"
-
-fit_sqlfile = "Orthel:Dawson007!27608@localhost:3306/wc_fitting"
-fit_mysqlfile = "mysql+pymysql://Orthel:Dawson007!27608@localhost:3306/wc_fitting"
 
 @st.cache_resource(ttl=600, show_spinner="Loading libsql connection...")
 def get_libsql_connection():
     """Get a connection to the libsql database"""
-    return libsql.connect(local_mkt_path)
+    return libsql.connect(local_mkt_path_str)
 
 def get_module_stock_list(module_names: list):
     """Get lists of modules with their stock quantities for display and CSV export."""
