@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 from db_handler import  *
 from sync_scheduler import initialize_sync_state, check_sync_status
 from logging_config import setup_logging
-from db_utils import sync_db
 import millify
-
+from config import DatabaseConfig
+from sync_state import sync_state
 
 
 # Insert centralized logging configuration
@@ -27,13 +27,8 @@ logger.info("Application started")
 logger.info(f"streamlit version: {st.__version__}")
 logger.info("-"*100)
 
-mkt_url = st.secrets["TURSO_DATABASE_URL"]
-mkt_auth_token = st.secrets["TURSO_AUTH_TOKEN"]
-
-sde_url = st.secrets["SDE_URL"]
-sde_auth_token = st.secrets["SDE_AUTH_TOKEN"]
-
-# Function to schedule daily database sync at 1300 UTC
+mkt_db = DatabaseConfig("wcmkt3")
+sde_db = DatabaseConfig("sde")
 
 # Function to get unique categories and item names
 def get_filter_options(selected_categories=None):
@@ -45,7 +40,7 @@ def get_filter_options(selected_categories=None):
         WHERE is_buy_order = 0
         """
         logger.info("getting filter options")
-        with Session(get_local_mkt_engine()) as session:
+        with Session(mkt_db.engine) as session:
             result = session.execute(text(mkt_query))
             type_ids = [row[0] for row in result.fetchall()]
 
@@ -64,7 +59,7 @@ def get_filter_options(selected_categories=None):
         JOIN invCategories ic ON ig.categoryID = ic.categoryID
         WHERE it.typeID IN ({type_ids_str})
         """
-        with Session(get_local_sde_engine()) as session:
+        with Session(sde_db.engine) as session:
             result = session.execute(text(sde_query))
             df = pd.DataFrame(result.fetchall(),
                               columns=['type_name', 'type_id', 'group_id', 'group_name', 'category_id', 'category_name'])
@@ -222,21 +217,14 @@ def create_history_chart(type_id):
 
 def display_sync_status():
     """Display sync status in the sidebar."""
-
-    last_update = get_update_time()
-    time_since_update = get_time_since_esi_update()
-    st.sidebar.markdown(f"**Last ESI update:** {last_update} UTC {time_since_update}")
+    time_since_esi_update = get_time_since_esi_update()
+    st.sidebar.markdown(f"**Last ESI update:** {time_since_esi_update}")
     time_until_update = get_time_until_next_update()
     st.sidebar.markdown(f"*Next ESI update in {time_until_update}*")
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Database Sync Status")
     status_color = "green" if st.session_state.sync_status == "Success" else "red"
-
-    if st.session_state.sync_available:
-        status_color = "orange"
-        st.session_state.sync_status = "Update available"
-
 
     if st.session_state.last_sync:
         last_sync_time = st.session_state.last_sync.strftime("%Y-%m-%d %H:%M UTC")
@@ -252,7 +240,7 @@ def display_sync_status():
     # Manual sync button
     if st.sidebar.button("Sync Now"):
         try:
-            sync_db()
+            mkt_db.sync()
             st.session_state.sync_status = "Success"
             st.rerun()
         except Exception as e:
@@ -261,32 +249,45 @@ def display_sync_status():
 
     if st.session_state.sync_status == "Success":
         st.sidebar.success("Database sync completed successfully!")
-    if st.session_state.sync_status == "Update available":
-        st.sidebar.warning("Update available, use sync now to refresh data")
 
 def main():
     logger.info("Starting main function")
 
     # Initialize all session state variables
-    if not st.session_state.get('sync_status'):
-        initialize_sync_state()
+    initialize_sync_state()
 
     # Check for sync needs using cached function
     logger.info("Checking sync status")
+    sync_info = sync_state()
+    sync_check = sync_info['sync_check']
+    last_sync = sync_info['last_sync']
+    next_sync = sync_info['next_sync']
 
-    if check_sync_status():
+    logger.info(f"sync_check: {sync_check}")
+    logger.info(f"last_sync: {last_sync}")
+    logger.info(f"next_sync: {next_sync}")
+    sync_check = False
+
+    if sync_check:
         logger.info("Sync needed, syncing now")
-        t1 = time.perf_counter()
-        sync_db()
-        t2 = time.perf_counter()
-        elapsed_time = (t2-t1)*1000
-        logger.info(f"TIME sync_db() = {elapsed_time} ms")
+        mkt_db.sync()
         st.session_state.sync_status = "Success"
-        st.session_state.update_time = get_update_time()
-        logger.info(f"Sync status updated to: {st.session_state.sync_status}\n, last sync: {st.session_state.last_sync}\n, next sync: {st.session_state.next_sync}\n")
         st.rerun()
     else:
         logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
+
+    # if check_sync_status():
+    #     logger.info("Sync needed, syncing now")
+    #     mkt_db.sync()
+    #     t2 = time.perf_counter()
+    #     elapsed_time = (t2-t1)*1000
+    #     logger.info(f"TIME sync_db() = {elapsed_time} ms")
+    #     st.session_state.sync_status = "Success"
+    #     st.session_state.update_time = get_update_time()
+    #     logger.info(f"Sync status updated to: {st.session_state.sync_status}\n, last sync: {st.session_state.last_sync}\n, next sync: {st.session_state.next_sync}\n")
+    #     st.rerun()
+    # else:
+    #     logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
 
     wclogo = "images/wclogo.png"
     st.image(wclogo, width=150)

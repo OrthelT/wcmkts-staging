@@ -4,26 +4,23 @@ import os
 import time
 import streamlit as st
 from logging_config import setup_logging
-
+from sync_state import sync_state
+from db_handler import get_time_since_esi_update, get_time_until_next_update
 
 logger = setup_logging(__name__)
 
-sync_file = "last_sync_state.json"
-
-with open(sync_file, "r") as f:
-    saved_sync_state = json.load(f)
-
-last_saved_sync = dt.datetime.strptime(saved_sync_state['last_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
-next_saved_sync = dt.datetime.strptime(saved_sync_state['next_sync'], "%Y-%m-%d %H:%M %Z").replace(tzinfo=dt.UTC)
-
+sync_info = sync_state()
+last_sync = sync_info['last_sync']
+next_sync = sync_info['next_sync']
+sync_check = sync_info['sync_check']
 
 def initialize_sync_state():
     if 'sync_status' not in st.session_state:
         st.session_state.sync_status = "Not yet run"
-    if st.session_state.get('last_sync') is None:
-        st.session_state['last_sync'] = last_saved_sync
-    if st.session_state.get('next_sync') is None:
-        st.session_state['next_sync'] = next_saved_sync
+    if 'last_sync' not in st.session_state:
+        st.session_state.last_sync = last_sync
+        st.session_state.next_sync = next_sync
+
 
 #cache for 15 minutes
 @st.cache_data(ttl=900)

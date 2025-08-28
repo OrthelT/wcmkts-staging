@@ -1,12 +1,13 @@
 import os
 import sys
-from sqlalchemy import create_engine, MetaData, inspect, text, select, update
-from sqlalchemy.orm import Session
-import pandas as pd
+os.environ.setdefault("RUST_LOG", "libsql=trace")
+from sqlalchemy import create_engine, text
 import streamlit as st
 import libsql
-import requests
 from logging_config import setup_logging
+import sqlite3 as sql
+import datetime as dt
+from sync_state import sync_state
 
 logger = setup_logging(__name__)
 
@@ -14,17 +15,19 @@ class DatabaseConfig:
     _db_paths = {
         "wcmkt3": "wcmkt3.db", #testing database
         "sde": "sde.db",
-        "build_cost": "build_cost.db",
+        "build_cost": "buildcost.db",
     }
 
     _db_turso_urls = {
         "wcmkt3_turso": st.secrets.wcmkt3_turso.url,
         "sde_turso": st.secrets.sde_aws_turso.url,
+        "build_cost_turso": st.secrets.buildcost_turso.url,
     }
 
     _db_turso_auth_tokens = {
         "wcmkt3_turso": st.secrets.wcmkt3_turso.token,
         "sde_turso": st.secrets.sde_aws_turso.token,
+        "build_cost_turso": st.secrets.buildcost_turso.token,
     }
 
     def __init__(self, alias: str, dialect: str = "sqlite+libsql"):
@@ -66,7 +69,7 @@ class DatabaseConfig:
     @property
     def libsql_sync_connect(self):
         if self._libsql_sync_connect is None:
-            self._libsql_sync_connect = libsql.connect(f"{self.path}", sync_url = self.turso_url, auth_token=self.token)
+            self._libsql_sync_connect = libsql.connect(self.path, sync_url = self.turso_url, auth_token=self.token)
         return self._libsql_sync_connect
 
     @property
@@ -76,20 +79,17 @@ class DatabaseConfig:
         return self._sqlite_local_connect
 
     def sync(self):
-
-        logger.info("connection established")
-        conn = self.libsql_sync_connect
-        logger.info("Syncing database...")
-        result = conn.sync()
-        logger.info(f"sync result: {result}")
+        with self.libsql_sync_connect as conn:
+            logger.info("Syncing database...")
+            conn.sync()
         conn.close()
-        if self.validate_sync():
-            logger.info("Sync complete")
-            sync_state = "successful"
-        else:
-            logger.error("Validation test failed.")
-            sync_state = "failed"
-        return sync_state
+        update_time = dt.datetime.now(dt.UTC)
+        sync_info = sync_state(update_time)
+        st.session_state.last_sync = sync_info['last_sync']
+        st.session_state.next_sync = sync_info['next_sync']
+        logger.info(f"Database synced at {update_time}")
+        validation_test = self.validate_sync()
+        st.session_state.sync_status = "Success" if validation_test else "Failed"
 
 
     def validate_sync(self)-> bool:
@@ -105,7 +105,6 @@ class DatabaseConfig:
         validation_test = remote_last_update == local_last_update
         logger.info(f"validation_test: {validation_test}")
         return validation_test
-
 
     def get_table_list(self, local_only: bool = True)-> list[tuple]:
         if local_only:
@@ -161,12 +160,6 @@ class DatabaseConfig:
                 column_info = [col.name for col in columns]
             return column_info
 
-
-def verbose_sync(db: DatabaseConfig):
-    sync_state = db.sync()
-    print("---------------------------")
-    print(f"sync_state: {sync_state}")
-    print("---------------------------")
 
 if __name__ == "__main__":
     pass

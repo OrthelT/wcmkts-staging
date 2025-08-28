@@ -14,7 +14,7 @@ import logging
 # ASYNC LIBRARIES
 import asyncio
 import httpx
-
+from config import DatabaseConfig
 
 API_TIMEOUT = 20.0
 MAX_CONCURRENCY = 6  # tune for the API's rate limits
@@ -39,13 +39,14 @@ import datetime
 import time
 from time import perf_counter, process_time
 
-build_cost_db = os.path.join("build_cost.db")
-build_cost_url = f"sqlite:///{build_cost_db}"
+
+build_cost_db = DatabaseConfig("build_cost")
+build_cost_url = build_cost_db.url
+
 valid_structures = [35827, 35825, 35826]
 super_shipyard_id = 1046452498926
 
 logger = setup_logging(__name__)
-
 
 @dataclass
 class JobQuery:
