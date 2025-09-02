@@ -39,7 +39,6 @@ import datetime
 import time
 from time import perf_counter, process_time
 
-
 build_cost_db = DatabaseConfig("build_cost")
 build_cost_url = build_cost_db.url
 
@@ -101,7 +100,6 @@ class JobQuery:
         url = f"https://api.everef.net/v1/industry/cost?product_id={self.item_id}&runs={self.runs}&me={self.me}&te={self.te}&structure_type_id={structure.structure_type_id}&security={self.security}{rigs}&system_cost_bonus={self.system_cost_bonus}&manufacturing_cost={system_cost_index}&facility_tax={tax}&material_prices={self.material_prices}"
         return url
 
-
 @st.cache_data(ttl=3600)
 def get_valid_rigs():
     rigs = fetch_rigs()
@@ -111,7 +109,6 @@ def get_valid_rigs():
         if v not in invalid_rigs:
             valid_rigs[k] = v
     return valid_rigs
-
 
 @st.cache_data(ttl=3600)
 def fetch_rigs():
@@ -126,7 +123,6 @@ def fetch_rigs():
         for name, id in zip(type_names, type_ids):
             types_dict[name] = id
         return types_dict
-
 
 def fetch_rig_id(rig_name: str | None):
     if rig_name is None:
@@ -144,7 +140,6 @@ def fetch_rig_id(rig_name: str | None):
             logger.error(f"Error fetching rig id for {rig_name}: {e}")
             return None
 
-
 def fetch_structure_by_name(structure_name: str):
     engine = sa.create_engine(build_cost_url)
     with engine.connect() as conn:
@@ -156,7 +151,6 @@ def fetch_structure_by_name(structure_name: str):
             return structure[0]
         else:
             raise Exception(f"No structure found for {structure_name}")
-
 
 @st.cache_data(ttl=3600)
 def get_structure_rigs() -> dict[int, list[int]]:
@@ -184,7 +178,6 @@ def get_structure_rigs() -> dict[int, list[int]]:
             rig_dict[structure] = clean_rig_ids
         return rig_dict
 
-
 @st.cache_data(ttl=3600)
 def get_manufacturing_cost_index(system_id: int) -> float | None:
 
@@ -201,7 +194,6 @@ def get_manufacturing_cost_index(system_id: int) -> float | None:
         else:
             raise Exception(f"No manufacturing cost index found for {system_id}")
 
-
 def get_type_id(type_name: str) -> int:
     url = f"https://www.fuzzwork.co.uk/api/typeid.php?typename={type_name}"
     response = requests.get(url)
@@ -214,7 +206,6 @@ def get_type_id(type_name: str) -> int:
             f"Error fetching type id for {type_name}: {response.status_code}"
         )
 
-
 def get_system_id(system_name: str) -> int:
     engine = sa.create_engine(build_cost_url)
     stmt = sa.select(Structure.system_id).where(Structure.system == system_name)
@@ -226,13 +217,11 @@ def get_system_id(system_name: str) -> int:
         else:
             raise Exception(f"No system id found for {system_name}")
 
-
 def get_costs(job: JobQuery, *, async_mode: bool = False) -> dict:
     if async_mode:
         return asyncio.run(get_costs_async(job))
     else:
         return get_costs_syncronous(job)
-
 
 def get_costs_syncronous(job: JobQuery) -> dict:
     status_log = {
@@ -298,7 +287,6 @@ def get_costs_syncronous(job: JobQuery) -> dict:
 
     return results
 
-
 async def fetch_one(
     client: httpx.AsyncClient,
     url: str,
@@ -332,7 +320,6 @@ async def fetch_one(
         )
     except Exception as e:
         return structure_name, None, str(e)
-
 
 async def get_costs_async(job: JobQuery) -> dict:
     structures = get_all_structures(unwrap=True)  # list[dict]
@@ -405,7 +392,6 @@ def display_log_status(status: dict):
 
     with open("status.log", "w") as f:
         f.write(json.dumps(status, indent=4))
-
 
 @st.cache_data(ttl=3600)
 def get_all_structures(
@@ -634,6 +620,8 @@ def initialise_session_state():
         st.session_state.super = False
     if "async_mode" not in st.session_state:
         st.session_state.async_mode = False
+    if "params_changed" not in st.session_state:
+        st.session_state.params_changed = False
     st.session_state.initialised = True
 
     try:
@@ -775,7 +763,8 @@ def display_material_costs(results: dict, selected_structure: str, item_id: str)
     st.info(
         "💡 **Tip:** You can download this data as CSV using the download icon (⬇️) in the top-right corner of the table above."
     )
-
+def init_calculate_clicked():
+    st.session_state.calculate_clicked = True
 
 def main():
 
@@ -826,6 +815,7 @@ def main():
         placeholder="Ship",
         help="Select a category to filter the groups and items by.",
     )
+
     category_df = df[df["category"] == selected_category]
     category_id = category_df["id"].values[0]
     logger.info(f"Selected category: {selected_category} ({category_id})")
@@ -848,7 +838,6 @@ def main():
     type_names = types_df["typeName"].unique()
     selected_item = st.sidebar.selectbox("Select an item", type_names)
     type_id = types_df[types_df["typeName"] == selected_item]["typeID"].values[0]
-
     runs = st.sidebar.number_input("Runs", min_value=1, max_value=1000000, value=1)
     me = st.sidebar.number_input("ME", min_value=0, max_value=10, value=0)
     te = st.sidebar.number_input("TE", min_value=0, max_value=20, value=0)
@@ -889,6 +878,7 @@ def main():
             index=None,
             placeholder="All Structures",
             help="Select a structure to compare the cost to build versus this structure. This is optional and will default to all structures.",
+            key="structure_selector",
         )
 
     # Create job parameters for comparison
@@ -900,22 +890,27 @@ def main():
         "me": me,
         "te": te,
         "price_source": st.session_state.price_source,
+        "selected_structure": selected_structure if not None else None
     }
     logger.info(f"Current job params: {current_job_params}")
-    logger.info(
-        f"st.session_state.calculate_clicked: {st.session_state.calculate_clicked}"
-    )
 
     # Check if parameters have changed (but don't auto-calculate)
-    params_changed = (
-        st.session_state.current_job_params is not None
-        and st.session_state.current_job_params != current_job_params
-    )
+    if st.session_state.current_job_params is not None:
+        if st.session_state.current_job_params != current_job_params:
+            st.session_state.params_changed = True
+            st.session_state.current_job_params = current_job_params
+
+        else:
+            st.session_state.params_changed = False
+            st.session_state.current_job_params = current_job_params
+
+    params_changed = st.session_state.params_changed
     logger.info(f"Params changed: {params_changed}")
     if params_changed:
         st.session_state.button_label = "Recalculate"
         if current_job_params["group_id"] in [30, 659]:
             st.session_state.super = True
+            st.session_state.structure_names = ["C-J7CR - New Super No Cap (Fraternity Building Management)"]
         else:
             if st.session_state.super == True:
                 get_all_structures.clear()
@@ -923,6 +918,8 @@ def main():
                 structure_names = get_all_structures()
                 structure_names = [structure.structure for structure in structure_names]
                 structure_names = sorted(structure_names)
+                st.session_state.structure_names = structure_names
+
         logger.info(f"Params changed, Super: {st.session_state.super}")
         st.warning(
             "⚠️ Parameters have changed. Click 'Recalculate' to get updated results."
@@ -932,15 +929,17 @@ def main():
         st.session_state.button_label = "Calculate"
         logger.info("Parameters not changed")
 
-    calculate_clicked = st.sidebar.button(
+    st.sidebar.button(
         st.session_state.button_label,
         type="primary",
+        key="calculate_button",
         help="Click to calculate the cost for the selected item.",
+        on_click=init_calculate_clicked,
     )
-
-    if calculate_clicked:
-        st.session_state.calculate_clicked = True
+    logger.info(f"Calculate clicked: {st.session_state.calculate_clicked}")
+    if st.session_state.calculate_clicked:
         st.session_state.selected_item_for_display = selected_item
+        st.session_state.params_changed = False
 
     if st.session_state.sci_last_modified:
         st.sidebar.markdown("---")
@@ -949,9 +948,6 @@ def main():
         )
 
     if st.session_state.calculate_clicked:
-        logger.info("Calculate button clicked, calculating")
-        st.session_state.calculate_clicked = False
-
         job = JobQuery(
             item=st.session_state.selected_item_for_display,
             item_id=type_id,
@@ -961,34 +957,16 @@ def main():
             te=te,
             material_prices=st.session_state.price_source,
         )
-        logger.info(f"=" * 80)
-        logger.info(f"=" * 80)
-        logger.info("\n")
-        logger.info(f"get_costs()")
-        logger.info(f"=" * 80)
-        logger.info(f"=" * 80)
-        logger.info("\n")
-        t1 = time.perf_counter()
 
         if st.session_state.async_mode:
             results = get_costs(job, async_mode=True)
         else:
             results = get_costs(job, async_mode=False)
-
-        t2 = time.perf_counter()
-        elapsed_time = round((t2 - t1) * 1000, 2)
-        logger.info(f"=" * 80)
-        logger.info(f"TIME get_costs() = {elapsed_time} ms")
-        logger.info(f"=" * 80)
-        logger.info("\n")
-
         # Cache the results and parameters
-        st.session_state.cost_results = results
-        st.session_state.current_job_params = current_job_params
-        st.session_state.selected_item_for_display = selected_item
-
-        if results is None:
-            logger.error(f"No results found for {selected_item}")
+        if results is not None:
+            st.session_state.cost_results = results
+        else:
+            st.error(f"No results found for {selected_item}")
             raise Exception(f"No results found for {selected_item}")
 
     # Display results if available (either fresh or cached)
@@ -1123,7 +1101,7 @@ def main():
 
         if selected_structure_for_materials:
             # Get the job item_id from current or cached parameters
-            if calculate_clicked:
+            if st.session_state.calculate_clicked:
                 job = JobQuery(
                     item=selected_item,
                     item_id=type_id,

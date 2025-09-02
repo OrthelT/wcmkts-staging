@@ -503,8 +503,6 @@ def main():
     st.write(f"Doctrine ID: {selected_doctrine_id}")
     st.markdown("---")
 
-
-
     # Display categorized doctrine data instead of simple dataframe
     display_categorized_doctrine_data(selected_data)
 
