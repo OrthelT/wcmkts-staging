@@ -217,7 +217,7 @@ def get_system_id(system_name: str) -> int:
         else:
             raise Exception(f"No system id found for {system_name}")
 
-def get_costs(job: JobQuery, *, async_mode: bool = False) -> dict:
+def get_costs(job: JobQuery, async_mode: bool = False) -> dict:
     if async_mode:
         return asyncio.run(get_costs_async(job))
     else:
@@ -244,6 +244,7 @@ def get_costs_syncronous(job: JobQuery) -> dict:
     for i in range(len(structures)):
 
         url, structure_name, structure_type = next(url_generator)
+        logger.info(structure_name)
 
         # Pad the line with spaces to ensure it's at least as long as the previous line
         status = f"\rFetching {i+1} of {len(structures)} structures: {structure_name}"
@@ -620,8 +621,6 @@ def initialise_session_state():
         st.session_state.super = False
     if "async_mode" not in st.session_state:
         st.session_state.async_mode = False
-    if "params_changed" not in st.session_state:
-        st.session_state.params_changed = False
     st.session_state.initialised = True
 
     try:
@@ -763,8 +762,7 @@ def display_material_costs(results: dict, selected_structure: str, item_id: str)
     st.info(
         "💡 **Tip:** You can download this data as CSV using the download icon (⬇️) in the top-right corner of the table above."
     )
-def init_calculate_clicked():
-    st.session_state.calculate_clicked = True
+
 
 def main():
 
@@ -815,7 +813,6 @@ def main():
         placeholder="Ship",
         help="Select a category to filter the groups and items by.",
     )
-
     category_df = df[df["category"] == selected_category]
     category_id = category_df["id"].values[0]
     logger.info(f"Selected category: {selected_category} ({category_id})")
@@ -838,7 +835,8 @@ def main():
     type_names = types_df["typeName"].unique()
     selected_item = st.sidebar.selectbox("Select an item", type_names)
     type_id = types_df[types_df["typeName"] == selected_item]["typeID"].values[0]
-    runs = st.sidebar.number_input("Runs", min_value=1, max_value=1000000, value=1)
+
+    runs = st.sidebar.number_input("Runs", min_value=1, max_value=100000, value=1)
     me = st.sidebar.number_input("ME", min_value=0, max_value=10, value=0)
     te = st.sidebar.number_input("TE", min_value=0, max_value=20, value=0)
 
@@ -878,7 +876,6 @@ def main():
             index=None,
             placeholder="All Structures",
             help="Select a structure to compare the cost to build versus this structure. This is optional and will default to all structures.",
-            key="structure_selector",
         )
 
     # Create job parameters for comparison
@@ -890,27 +887,22 @@ def main():
         "me": me,
         "te": te,
         "price_source": st.session_state.price_source,
-        "selected_structure": selected_structure if not None else None
     }
     logger.info(f"Current job params: {current_job_params}")
+    logger.info(
+        f"st.session_state.calculate_clicked: {st.session_state.calculate_clicked}"
+    )
 
     # Check if parameters have changed (but don't auto-calculate)
-    if st.session_state.current_job_params is not None:
-        if st.session_state.current_job_params != current_job_params:
-            st.session_state.params_changed = True
-            st.session_state.current_job_params = current_job_params
-
-        else:
-            st.session_state.params_changed = False
-            st.session_state.current_job_params = current_job_params
-
-    params_changed = st.session_state.params_changed
+    params_changed = (
+        st.session_state.current_job_params is not None
+        and st.session_state.current_job_params != current_job_params
+    )
     logger.info(f"Params changed: {params_changed}")
     if params_changed:
         st.session_state.button_label = "Recalculate"
         if current_job_params["group_id"] in [30, 659]:
             st.session_state.super = True
-            st.session_state.structure_names = ["C-J7CR - New Super No Cap (Fraternity Building Management)"]
         else:
             if st.session_state.super == True:
                 get_all_structures.clear()
@@ -918,8 +910,6 @@ def main():
                 structure_names = get_all_structures()
                 structure_names = [structure.structure for structure in structure_names]
                 structure_names = sorted(structure_names)
-                st.session_state.structure_names = structure_names
-
         logger.info(f"Params changed, Super: {st.session_state.super}")
         st.warning(
             "⚠️ Parameters have changed. Click 'Recalculate' to get updated results."
@@ -929,17 +919,15 @@ def main():
         st.session_state.button_label = "Calculate"
         logger.info("Parameters not changed")
 
-    st.sidebar.button(
+    calculate_clicked = st.sidebar.button(
         st.session_state.button_label,
         type="primary",
-        key="calculate_button",
         help="Click to calculate the cost for the selected item.",
-        on_click=init_calculate_clicked,
     )
-    logger.info(f"Calculate clicked: {st.session_state.calculate_clicked}")
-    if st.session_state.calculate_clicked:
+
+    if calculate_clicked:
+        st.session_state.calculate_clicked = True
         st.session_state.selected_item_for_display = selected_item
-        st.session_state.params_changed = False
 
     if st.session_state.sci_last_modified:
         st.sidebar.markdown("---")
@@ -948,6 +936,9 @@ def main():
         )
 
     if st.session_state.calculate_clicked:
+        logger.info("Calculate button clicked, calculating")
+        st.session_state.calculate_clicked = False
+
         job = JobQuery(
             item=st.session_state.selected_item_for_display,
             item_id=type_id,
@@ -957,17 +948,30 @@ def main():
             te=te,
             material_prices=st.session_state.price_source,
         )
+        logger.info(f"=" * 80)
+        logger.info(f"=" * 80)
+        logger.info("\n")
+        logger.info(f"get_costs()")
+        logger.info(f"=" * 80)
+        logger.info(f"=" * 80)
+        logger.info("\n")
+        t1 = time.perf_counter()
 
-        if st.session_state.async_mode:
-            results = get_costs(job, async_mode=True)
-        else:
-            results = get_costs(job, async_mode=False)
+
+        results = get_costs(job, async_mode)
+
+        t2 = time.perf_counter()
+        elapsed_time = round((t2 - t1) * 1000, 2)
+        logger.info(f"=" * 80)
+        logger.info(f"TIME get_costs() = {elapsed_time} ms")
+        logger.info(f"=" * 80)
+        logger.info("\n")
+
         # Cache the results and parameters
-        if results is not None:
-            st.session_state.cost_results = results
-        else:
-            st.error(f"No results found for {selected_item}")
-            raise Exception(f"No results found for {selected_item}")
+        st.session_state.cost_results = results
+        st.session_state.current_job_params = current_job_params
+        st.session_state.selected_item_for_display = selected_item
+        st.rerun()
 
     # Display results if available (either fresh or cached)
     if (
@@ -1101,7 +1105,7 @@ def main():
 
         if selected_structure_for_materials:
             # Get the job item_id from current or cached parameters
-            if st.session_state.calculate_clicked:
+            if calculate_clicked:
                 job = JobQuery(
                     item=selected_item,
                     item_id=type_id,

@@ -227,10 +227,10 @@ def display_sync_status():
     status_color = "green" if st.session_state.sync_status == "Success" else "red"
 
     if st.session_state.last_sync:
-        last_sync_time = st.session_state.last_sync.strftime("%Y-%m-%d %H:%M UTC")
+        last_sync_time = st.session_state.last_sync
         st.sidebar.markdown(f"**Last sync:** {last_sync_time}")
         if st.session_state.next_sync:
-            next_sync_time = st.session_state.next_sync.strftime("%Y-%m-%d %H:%M UTC")
+            next_sync_time = st.session_state.next_sync
             st.sidebar.markdown(f"**Next scheduled sync:** {next_sync_time}")
     else:
         st.sidebar.markdown("**Last sync:** Not yet run")

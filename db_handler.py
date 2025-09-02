@@ -219,7 +219,7 @@ def get_time_since_esi_update()->str:
     """
     df = query_local_mkt_db(query)
 
-    dt_last_update = datetime.datetime.strptime(df.iloc[0]['last_update'], '%Y-%m-%d %H:%M:%S.%f')
+    dt_last_update = datetime.datetime.strptime(df.iloc[0]['last_update'], '%Y-%m-%d %H:%M:%S.%f').astimezone(tz=datetime.UTC)
     dt_now = datetime.datetime.now(datetime.UTC)
     time_since_update = dt_now - dt_last_update
 

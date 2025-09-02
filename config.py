@@ -1,6 +1,5 @@
 import os
 import sys
-os.environ.setdefault("RUST_LOG", "libsql=trace")
 from sqlalchemy import create_engine, text
 import streamlit as st
 import libsql
