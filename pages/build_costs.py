@@ -34,7 +34,7 @@ from db_handler import (
     get_4H_price,
     request_type_names,
 )
-from db_utils import update_industry_index
+from utils import update_industry_index
 import datetime
 import time
 from time import perf_counter, process_time
@@ -219,11 +219,13 @@ def get_system_id(system_name: str) -> int:
 
 def get_costs(job: JobQuery, async_mode: bool = False) -> dict:
     if async_mode:
-        return asyncio.run(get_costs_async(job))
+        results, status_log = asyncio.run(get_costs_async(job))
     else:
-        return get_costs_syncronous(job)
+        results, status_log = get_costs_syncronous(job)
 
-def get_costs_syncronous(job: JobQuery) -> dict:
+    return results, status_log
+
+def get_costs_syncronous(job: JobQuery) -> tuple[dict, dict]:
     status_log = {
         "req_count": 0,
         "success_count": 0,
@@ -284,9 +286,8 @@ def get_costs_syncronous(job: JobQuery) -> dict:
             "total_job_cost": data2["total_job_cost"],
             "materials": data2["materials"],
         }
-    display_log_status(status_log)
 
-    return results
+    return results, status_log
 
 async def fetch_one(
     client: httpx.AsyncClient,
@@ -322,7 +323,7 @@ async def fetch_one(
     except Exception as e:
         return structure_name, None, str(e)
 
-async def get_costs_async(job: JobQuery) -> dict:
+async def get_costs_async(job: JobQuery) -> tuple[dict, dict]:
     structures = get_all_structures(unwrap=True)  # list[dict]
     url_generator = job.yield_urls()
 
@@ -330,6 +331,13 @@ async def get_costs_async(job: JobQuery) -> dict:
     errors = []
     results_count = 0
     errors_count = 0
+    status_log = {
+        "req_count": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "success_log": {},
+        "error_log": {},
+    }
     # Reduce connection limits to be more gentle on the server
     limits = httpx.Limits(
         max_connections=MAX_CONCURRENCY, max_keepalive_connections=MAX_CONCURRENCY
@@ -362,25 +370,28 @@ async def get_costs_async(job: JobQuery) -> dict:
             status = f"\rFetching {i} of {len(structures)} structures: {structure_name}"
             progress_bar.progress(i / len(structures), text=status)
             structure_name, result, error = await coro
+            status_log["req_count"] += 1
 
             if result:
                 results[structure_name] = result
-                results_count += 1
+                status_log["success_count"] += 1
+                status_log["success_log"][structure_name] = (result, None)
             if error:
-                errors.append((structure_name, error))
-                errors_count += 1
+                status_log["error_count"] += 1
+                status_log["error_log"][structure_name] = (None, error)
 
     # Log errors if needed
-    if errors:
-        for s, e in errors:
+    if status_log["error_count"] > 0:
+        for s, e in status_log["error_log"].items():
             logger.error(f"Error fetching {s}: {e}")
-    print("="*80)
-    logger.info(f"Results of {len(structures)} structures:")
-    logger.info(f"Results count: {results_count}")
-    logger.info(f"Errors count: {errors_count}")
-    print("="*80)
 
-    return results
+    logger.info("="*80)
+    logger.info(f"Results of {len(structures)} structures:")
+    logger.info(f"Results count: {status_log['success_count']}")
+    logger.info(f"Errors count: {status_log['error_count']}")
+    logger.info("="*80)
+
+    return results, status_log
 
 def display_log_status(status: dict):
 
@@ -390,6 +401,9 @@ def display_log_status(status: dict):
     logger.info(f"Errors: {status['error_count']}")
     if status["error_count"] > 0:
         logger.error(f"Error Log: {status['error_log']}")
+        st.toast(f"Errors returned for {status['error_count']}. This is likely due to problems with the external industry data API. Please try again later.", icon="⚠️")
+    else:
+        st.toast(f"Returned results for {status['success_count']} structures.", icon="✅")
 
     with open("status.log", "w") as f:
         f.write(json.dumps(status, indent=4))
@@ -475,6 +489,7 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
         )
 
     col_order = [
+        "_index",
         "structure_type",
         "units",
         "total_cost",
@@ -491,6 +506,10 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
         col_order.insert(3, "comparison_cost_per_unit")
 
     col_config = {
+        "_index": st.column_config.TextColumn(
+            label="structure", help="Structure Name"
+        ),
+
         "structure_type": " type",
         "units": st.column_config.NumberColumn(
             "units", help="Number of units built", width=60
@@ -498,23 +517,25 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
         "total_cost": st.column_config.NumberColumn(
             "total cost",
             help="Total cost of building the units",
-            format="compact",
-            width="small",
+            format="localized",
+            step=1
         ),
         "total_cost_per_unit": st.column_config.NumberColumn(
             "cost per unit",
             help="Cost per unit of the item",
-            format="compact",
-            width="small",
+            format="localized",
+            step=1,
         ),
         "total_material_cost": st.column_config.NumberColumn(
-            "material cost", help="Total material cost", format="compact", width="small"
+            "material cost",
+            help="Total material cost",
+            format="localized",
+            step=1
         ),
         "total_job_cost": st.column_config.NumberColumn(
             "total job cost",
             help="Total job cost, which includes the facility tax, SCC surcharge, and system cost index",
             format="compact",
-            width="small",
         ),
         "facility_tax": st.column_config.NumberColumn(
             "facility tax", help="Facility tax cost", format="compact", width="small"
@@ -628,7 +649,7 @@ def initialise_session_state():
     except Exception as e:
         logger.error(f"Error checking industry index expiry: {e}")
 
-
+@st.fragment()
 def display_material_costs(results: dict, selected_structure: str, item_id: str):
     """
     Display material costs for a selected structure with proper formatting.
@@ -765,7 +786,9 @@ def display_material_costs(results: dict, selected_structure: str, item_id: str)
 
 
 def main():
-
+    logger.info("="*80)
+    logger.info("Starting build cost tool")
+    logger.info("="*80)
     if "initialised" not in st.session_state:
         initialise_session_state()
     else:
@@ -911,7 +934,7 @@ def main():
                 structure_names = [structure.structure for structure in structure_names]
                 structure_names = sorted(structure_names)
         logger.info(f"Params changed, Super: {st.session_state.super}")
-        st.warning(
+        st.toast(
             "⚠️ Parameters have changed. Click 'Recalculate' to get updated results."
         )
         logger.info("Parameters changed")
@@ -957,8 +980,14 @@ def main():
         logger.info("\n")
         t1 = time.perf_counter()
 
+        results, status_log = get_costs(job, async_mode)
+        logger.info(f"Status log: {status_log['success_count']} success, {status_log['error_count']} errors")
 
-        results = get_costs(job, async_mode)
+        display_log_status(status_log)
+
+        if not results:
+            st.error("No results returned. This is likely due to problems with the external industry data API. Please try again later.")
+            return
 
         t2 = time.perf_counter()
         elapsed_time = round((t2 - t1) * 1000, 2)
@@ -1063,6 +1092,7 @@ def main():
             )
         else:
             st.write("No price data found for this item")
+
 
         display_df, col_config, col_order = display_data(
             build_cost_df, selected_structure

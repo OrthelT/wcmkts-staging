@@ -12,7 +12,6 @@ from plotly.subplots import make_subplots
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from db_handler import  *
-from sync_scheduler import initialize_sync_state, check_sync_status
 from logging_config import setup_logging
 import millify
 from config import DatabaseConfig
@@ -254,27 +253,23 @@ def main():
     logger.info("Starting main function")
     logger.info(mkt_db.path)
 
-    # Initialize all session state variables
-    initialize_sync_state()
-
-    # Check for sync needs using cached function
-    logger.info("Checking sync status")
+    logger.info("Checking sync status and initiating sync state")
     sync_info = sync_state()
-    sync_check = sync_info['sync_check']
+    sync_needed = sync_info['sync_needed']
     last_sync = sync_info['last_sync']
     next_sync = sync_info['next_sync']
 
-    logger.info(f"sync_check: {sync_check}")
+    logger.info(f"sync_needed: {sync_needed}")
     logger.info(f"last_sync: {last_sync}")
     logger.info(f"next_sync: {next_sync}")
 
-    if sync_check:
+    if sync_needed:
         logger.info("Sync needed, syncing now")
         mkt_db.sync()
         st.session_state.sync_status = "Success"
         st.rerun()
     else:
-        logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
+        logger.info(f"No sync needed: last sync: {last_sync}, next sync: {next_sync}\n")
 
     # if check_sync_status():
     #     logger.info("Sync needed, syncing now")

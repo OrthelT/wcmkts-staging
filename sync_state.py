@@ -6,8 +6,10 @@ from logging_config import setup_logging
 
 logger = setup_logging(__name__)
 
+
+
 # Static sync times every 2 hours starting at 12:00
-SYNC_TIMES = ["12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00", "02:00", "04:00", "06:00", "08:00", "10:00"]
+SYNC_SCHEDULE = ["12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00", "02:00", "04:00", "06:00", "08:00", "10:00"]
 
 def sync_state(sync_time: dt.datetime = None) -> dict:
     """
@@ -22,6 +24,11 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
     """
     # Use current time for calculations
     current_time = dt.datetime.now(dt.timezone.utc)
+    logger.info(f"current_time: {current_time}")
+
+    #initialise session state
+    if 'sync_status' not in st.session_state:
+        st.session_state.sync_status = "Not yet run"
 
     # Load existing state or create default
     json_file = "last_sync_state.json"
@@ -33,23 +40,25 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
             saved_sync = {
                 "last_sync": "2025-01-01 00:00 UTC",
                 "next_sync": "2025-01-01 12:00 UTC",
-                "sync_times": SYNC_TIMES
+                "sync_times": SYNC_SCHEDULE
             }
     else:
         saved_sync = {
             "last_sync": "2025-01-01 00:00 UTC",
             "next_sync": "2025-01-01 12:00 UTC",
-            "sync_times": SYNC_TIMES
+            "sync_times": SYNC_SCHEDULE
         }
 
     if sync_time is not None:
-        st.session_state.last_sync = sync_time
         current_sync_str = sync_time.strftime("%Y-%m-%d %H:%M UTC")
-        saved_sync["last_sync"] = current_sync_str
+        next_sync_datetime = next_sync_time(sync_time)
+        next_sync_str = next_sync_datetime.strftime("%Y-%m-%d %H:%M UTC")
         logger.info(f"saved_sync: {saved_sync}")
         logger.info(f"current_sync_str: {current_sync_str}")
     else:
         current_sync_str = saved_sync["last_sync"]
+        next_sync_datetime = next_sync_time(saved_sync["last_sync"])
+        next_sync_str = next_sync_datetime.strftime("%Y-%m-%d %H:%M UTC")
 
     # Parse the last_sync time (now updated if sync_time was provided)
     last_sync_datetime = dt.datetime.strptime(saved_sync["last_sync"], "%Y-%m-%d %H:%M UTC").replace(tzinfo=dt.timezone.utc)
@@ -57,83 +66,68 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
 
     # Check if we need to sync based on last_sync time
     # If last_sync was more than 2 hours ago, we need to sync
-    time_since_last_sync = current_time - last_sync_datetime
-    sync_status = time_since_last_sync >= dt.timedelta(hours=2)
-    logger.info(f"sync_status: {sync_status}")
-    logger.info(f"time_since_last_sync: {time_since_last_sync}")
-    # If sync is needed, calculate the new next sync time
-    if sync_status:
-        # Find the next sync time in the schedule
-        next_sync_datetime = None
+    next_sync_datetime = dt.datetime.strptime(saved_sync["next_sync"], "%Y-%m-%d %H:%M UTC").replace(tzinfo=dt.timezone.utc)
+    time_since_next_sync = current_time - last_sync_datetime
+    sync_needed = current_time > next_sync_datetime
+    logger.info(f"sync_needed: {sync_needed}")
+    logger.info(f"time_since_next_sync: {time_since_next_sync}")
 
-        for time_str in SYNC_TIMES:
-            hour = int(time_str.split(':')[0])
+    # Use existing next_sync time
 
-            # Calculate the datetime for this sync time today
-            potential_sync = current_time.replace(hour=hour, minute=0, second=0, microsecond=0)
-
-            # If this time has passed today, try tomorrow
-            if potential_sync <= current_time:
-                potential_sync += dt.timedelta(days=1)
-
-            # Check if this sync time is within 2 hours
-            time_diff = potential_sync - current_time
-            if time_diff <= dt.timedelta(hours=2):
-                next_sync_datetime = potential_sync
-                break
-
-        # If no sync time found within 2 hours, use the next available time
-        if next_sync_datetime is None:
-            for time_str in SYNC_TIMES:
-                hour = int(time_str.split(':')[0])
-                potential_sync = current_time.replace(hour=hour, minute=0, second=0, microsecond=0)
-
-                if potential_sync <= current_time:
-                    potential_sync += dt.timedelta(days=1)
-
-                next_sync_datetime = potential_sync
-                break
-
-        next_sync_str = next_sync_datetime.strftime("%Y-%m-%d %H:%M UTC")
-
-        # Update saved_sync with new next_sync time
-        saved_sync["next_sync"] = next_sync_str
-        saved_sync["sync_times"] = SYNC_TIMES
-
-        logger.info(f"saved_sync: {saved_sync}")
-        logger.info(f"current_sync_str: {current_sync_str}")
-        logger.info(f"next_sync_str: {next_sync_str}")
-        logger.info(f"sync_status: {sync_status}")
-
-        # Write to JSON file
-        with open(json_file, 'w') as f:
-            json.dump(saved_sync, f, indent=2)
-    else:
-        # Use existing next_sync time
-        next_sync_str = saved_sync["next_sync"]
-
-    # Update session state
+    # Update session state and saved_sync
     st.session_state["last_sync"] = current_sync_str
     st.session_state["next_sync"] = next_sync_str
 
+    saved_sync["last_sync"] = current_sync_str
+    saved_sync["next_sync"] = next_sync_str
+    saved_sync["sync_times"] = SYNC_SCHEDULE
+    saved_sync["sync_needed"] = sync_needed
+    # Write to JSON file
+    with open(json_file, 'w') as f:
+        json.dump(saved_sync, f, indent=2)
 
-    return {
-        "last_sync": current_sync_str,
-        "next_sync": next_sync_str,
-        "sync_check": sync_status
-    }
+    return saved_sync
 
 def update_saved_sync():
-
     sync_info = {
         "last_sync": st.session_state.last_sync,
         "next_sync": st.session_state.next_sync,
-        "sync_times": SYNC_TIMES
+        "sync_times": SYNC_SCHEDULE
     }
     with open("last_sync_state.json", "w") as f:
         json.dump(sync_info, f, indent=2)
 
+def next_sync_time(last_sync: dt.datetime | str):
+    """ASSUMES SYNC_SCHEDULE = ["12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00", "02:00", "04:00", "06:00", "08:00", "10:00"] AND THAT SYNC IS NEEDED ON TWO HOUR INTERVALS"""
+    if isinstance(last_sync, str):
+        last_sync = dt.datetime.strptime(last_sync, "%Y-%m-%d %H:%M UTC").replace(tzinfo=dt.timezone.utc)
+
+    last_sync_hour = last_sync.hour
+    current_time = dt.datetime.now(dt.timezone.utc)
+
+    def test_sync_in_past(test_sync_time):
+        now_plus_2hrs = current_time + dt.timedelta(hours=2)
+
+        if test_sync_time < current_time:
+            if now_plus_2hrs.hour % 2 == 0:
+                return current_time.replace(minute=0, second=0, microsecond=0)
+            else:
+                return current_time.replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=1)
+        else:
+            return test_sync_time
+
+    if last_sync_hour >= 22:
+        next_sync = last_sync.replace(hour=0, minute=0, second=0, microsecond=0) + dt.timedelta(days=1)
+
+    elif last_sync_hour % 2 == 0:
+        next_sync = last_sync.replace(hour=last_sync_hour + 2, minute=0, second=0, microsecond=0)
+    else:
+        next_sync = last_sync.replace(hour=last_sync_hour + 1, minute=0, second=0, microsecond=0)
+
+    next_sync = test_sync_in_past(next_sync)
+
+    return next_sync
+
+
 if __name__ == "__main__":
-    # Test the function
-    ss = sync_state()
-    print(ss)
+    pass

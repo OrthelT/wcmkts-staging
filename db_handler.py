@@ -254,9 +254,11 @@ def get_time_until_next_update()->str:
     with open("last_sync_state.json", "r") as f:
         last_sync_state = json.load(f)
     next_sync = last_sync_state['next_sync']
+    logger.info(f"next_sync: {next_sync}")
+    logger.info(f"session state next_sync: {st.session_state.next_sync}")
 
-    next_sync = datetime.datetime.strptime(next_sync, '%Y-%m-%d %H:%M UTC')
-    dt_now = datetime.datetime.utcnow()
+    next_sync = datetime.datetime.strptime(next_sync, '%Y-%m-%d %H:%M UTC').replace(tzinfo=datetime.UTC)
+    dt_now = datetime.datetime.now(datetime.UTC)
     time_until_update = next_sync - dt_now
     if time_until_update.total_seconds() < 0:
         st.session_state.sync_available = True
@@ -283,7 +285,6 @@ def get_time_until_next_update()->str:
     else:
         result = f"{int(hours)} {hour}, {int(minutes)} {min}"
     return result
-
 
 def get_module_fits(type_id):
 
@@ -316,7 +317,6 @@ def get_group_fits(group_id):
             SELECT * FROM doctrines WHERE group_id = {group_id}
             """
         return pd.read_sql_query(query, (mkt_db.engine))
-
 
 def get_groups_for_category(category_id: int)->pd.DataFrame:
     if category_id == 17:
@@ -372,7 +372,6 @@ def get_4H_price(type_id):
         return df.price.iloc[0]
     except:
         return None
-
 
 def get_market_data(show_all, selected_categories, selected_items):
     # Get filtered_type_ids based on selected categories and items
