@@ -27,7 +27,7 @@ logger.info("Application started")
 logger.info(f"streamlit version: {st.__version__}")
 logger.info("-"*100)
 
-mkt_db = DatabaseConfig("wcmkt3")
+mkt_db = DatabaseConfig("wcmkt2")
 sde_db = DatabaseConfig("sde")
 
 # Function to get unique categories and item names
@@ -252,6 +252,7 @@ def display_sync_status():
 
 def main():
     logger.info("Starting main function")
+    logger.info(mkt_db.path)
 
     # Initialize all session state variables
     initialize_sync_state()
@@ -266,7 +267,6 @@ def main():
     logger.info(f"sync_check: {sync_check}")
     logger.info(f"last_sync: {last_sync}")
     logger.info(f"next_sync: {next_sync}")
-    sync_check = False
 
     if sync_check:
         logger.info("Sync needed, syncing now")

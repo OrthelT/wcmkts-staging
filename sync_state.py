@@ -2,6 +2,9 @@ import streamlit as st
 import datetime as dt
 import json
 import os
+from logging_config import setup_logging
+
+logger = setup_logging(__name__)
 
 # Static sync times every 2 hours starting at 12:00
 SYNC_TIMES = ["12:00", "14:00", "16:00", "18:00", "20:00", "22:00", "00:00", "02:00", "04:00", "06:00", "08:00", "10:00"]
@@ -43,17 +46,21 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
         st.session_state.last_sync = sync_time
         current_sync_str = sync_time.strftime("%Y-%m-%d %H:%M UTC")
         saved_sync["last_sync"] = current_sync_str
+        logger.info(f"saved_sync: {saved_sync}")
+        logger.info(f"current_sync_str: {current_sync_str}")
     else:
         current_sync_str = saved_sync["last_sync"]
 
     # Parse the last_sync time (now updated if sync_time was provided)
     last_sync_datetime = dt.datetime.strptime(saved_sync["last_sync"], "%Y-%m-%d %H:%M UTC").replace(tzinfo=dt.timezone.utc)
+    logger.info(f"last_sync_datetime: {last_sync_datetime}")
 
     # Check if we need to sync based on last_sync time
     # If last_sync was more than 2 hours ago, we need to sync
     time_since_last_sync = current_time - last_sync_datetime
     sync_status = time_since_last_sync >= dt.timedelta(hours=2)
-
+    logger.info(f"sync_status: {sync_status}")
+    logger.info(f"time_since_last_sync: {time_since_last_sync}")
     # If sync is needed, calculate the new next sync time
     if sync_status:
         # Find the next sync time in the schedule
@@ -93,6 +100,11 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
         saved_sync["next_sync"] = next_sync_str
         saved_sync["sync_times"] = SYNC_TIMES
 
+        logger.info(f"saved_sync: {saved_sync}")
+        logger.info(f"current_sync_str: {current_sync_str}")
+        logger.info(f"next_sync_str: {next_sync_str}")
+        logger.info(f"sync_status: {sync_status}")
+
         # Write to JSON file
         with open(json_file, 'w') as f:
             json.dump(saved_sync, f, indent=2)
@@ -104,12 +116,24 @@ def sync_state(sync_time: dt.datetime = None) -> dict:
     st.session_state["last_sync"] = current_sync_str
     st.session_state["next_sync"] = next_sync_str
 
+
     return {
         "last_sync": current_sync_str,
         "next_sync": next_sync_str,
         "sync_check": sync_status
     }
 
+def update_saved_sync():
+
+    sync_info = {
+        "last_sync": st.session_state.last_sync,
+        "next_sync": st.session_state.next_sync,
+        "sync_times": SYNC_TIMES
+    }
+    with open("last_sync_state.json", "w") as f:
+        json.dump(sync_info, f, indent=2)
+
 if __name__ == "__main__":
     # Test the function
-    pass
+    ss = sync_state()
+    print(ss)

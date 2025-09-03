@@ -12,7 +12,7 @@ logger = setup_logging(__name__)
 
 # Import from the root directory
 
-mktdb = DatabaseConfig("wcmkt3")
+mktdb = DatabaseConfig("wcmkt2")
 
 def get_filter_options(selected_categories=None):
     try:

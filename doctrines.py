@@ -29,7 +29,7 @@ SHIP_TARGETS = {
     'default': 20  # Default target if ship not found
 }
 
-mktdb = DatabaseConfig("wcmkt3")
+mktdb = DatabaseConfig("wcmkt2")
 
 def get_target_value(ship_name):
     """Get the target value for a ship type"""
@@ -136,4 +136,4 @@ def get_fit_info()->pd.DataFrame:
 
 
 if __name__ == "__main__":
-    pass
+    fit_info = get_fit_info()

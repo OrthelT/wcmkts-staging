@@ -11,7 +11,7 @@ import datetime
 import json
 from config import DatabaseConfig
 
-mkt_db = DatabaseConfig("wcmkt3")
+mkt_db = DatabaseConfig("wcmkt2")
 sde_db = DatabaseConfig("sde")
 build_cost_db = DatabaseConfig("build_cost")
 
@@ -219,9 +219,13 @@ def get_time_since_esi_update()->str:
     """
     df = query_local_mkt_db(query)
 
-    dt_last_update = datetime.datetime.strptime(df.iloc[0]['last_update'], '%Y-%m-%d %H:%M:%S.%f').astimezone(tz=datetime.UTC)
+    dt_last_update = datetime.datetime.strptime(df.iloc[0]['last_update'], '%Y-%m-%d %H:%M:%S.%f').replace(tzinfo=datetime.UTC)
+    logger.info(f"dt_last_update: {dt_last_update}")
     dt_now = datetime.datetime.now(datetime.UTC)
+    logger.info(f"dt_now: {dt_now}")
     time_since_update = dt_now - dt_last_update
+
+    logger.info(f"time_since_update: {time_since_update}")
 
     # Calculate hours and minutes from total seconds
     total_seconds = int(time_since_update.total_seconds())

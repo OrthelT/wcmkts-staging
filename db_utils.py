@@ -10,7 +10,7 @@ from sync_scheduler import schedule_next_sync
 import requests
 from config import DatabaseConfig
 
-mkt_db = DatabaseConfig("wcmkt3")
+mkt_db = DatabaseConfig("wcmkt2")
 sde_db = DatabaseConfig("sde")
 build_cost_db = DatabaseConfig("build_cost")
 
@@ -64,7 +64,7 @@ def fetch_industry_system_cost_indices():
             "Accept": "application/json",
             "User-Agent": "WC Markets v0.52 (admin contact: Orthel.Toralen@gmail.com; +https://github.com/OrthelT/wcmkts_new"
         }
-    print(headers)
+
     response = requests.get(url, headers=headers)
 
     print(response.status_code)

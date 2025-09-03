@@ -8,13 +8,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import pathlib
 from logging_config import setup_logging
-
+from db_handler import get_update_time
 from doctrines import create_fit_df, get_fit_summary
 from config import DatabaseConfig
 
 logger = setup_logging(__name__, log_file="experiments.log")
 
-mktdb = DatabaseConfig("wcmkt3")
+mktdb = DatabaseConfig("wcmkt2")
 
 icon_id = 0
 icon_url = f"https://images.evetech.net/types/{icon_id}/render?size=64"
@@ -58,7 +58,7 @@ def get_module_stock_list(module_names: list):
 def get_doctrine_lead_ship(doctrine_id: int) -> int:
     """Get the type ID of the lead ship for a doctrine"""
     query = f"SELECT * FROM lead_ships WHERE doctrine_id = {doctrine_id}"
-    with mktdb.libsql_local_connect as conn:
+    with mktdb.engine.connect() as conn:
         df = pd.read_sql_query(query, conn)
         if df.empty:
             return None
@@ -68,41 +68,19 @@ def get_doctrine_lead_ship(doctrine_id: int) -> int:
 def get_fit_name_from_db(fit_id: int) -> str:
     """Get the fit name from the ship_targets table using fit_id."""
     try:
-        conn = mktdb.libsql_local_connect
-        cursor = conn.cursor()
-        cursor.execute("SELECT fit_name FROM ship_targets WHERE fit_id = ?", (fit_id,))
-        result = cursor.fetchone()
+        logger.info(f"Getting fit name from database for fit_id: {fit_id}")
+        logger.info(f"Query: SELECT fit_name FROM ship_targets WHERE fit_id = :fit_id")
+        with mktdb.engine.connect() as conn:
+            result = conn.execute(text("SELECT fit_name FROM ship_targets WHERE fit_id = :fit_id"), {"fit_id": fit_id})
+            row = result.fetchone()
+            if row:
+                fit_name = row[0]
+            else:
+                fit_name = "Unknown Fit"
+        logger.info(f"Fit name: {fit_name}")
         conn.close()
+        return fit_name
 
-        if result:
-            fit_name = result[0]
-
-            # Handle specific fit name corrections that might get reinserted during DB updates
-            fit_name_corrections = {
-                # fit_id 39: Correct the incorrect "zz pre2202 WC Hurricane - Drake - Links" name
-                39: {
-                    "incorrect_patterns": ["zz pre2202 WC Hurricane - Drake - Links"],
-                    "correct_name": "WC-EN Shield Links Drake v2.0"
-                }
-            }
-
-            # Check if this fit_id has corrections and apply them if needed
-            if fit_id in fit_name_corrections:
-                correction_info = fit_name_corrections[fit_id]
-                for incorrect_pattern in correction_info["incorrect_patterns"]:
-                    if incorrect_pattern in fit_name:
-                        logger.info(f"Auto-correcting fit name for fit_id {fit_id}: '{fit_name}' -> '{correction_info['correct_name']}'")
-
-                        # Update the database with the correct name
-                        cursor.execute("UPDATE ship_targets SET fit_name = ? WHERE fit_id = ?",
-                                     (correction_info["correct_name"], fit_id))
-                        conn.commit()
-
-                        return correction_info["correct_name"]
-
-            return fit_name
-        else:
-            return "Unknown Fit"
     except Exception as e:
         logger.error(f"Error getting fit name for fit_id: {fit_id}")
         logger.error(f"Error: {e}")

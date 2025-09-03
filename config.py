@@ -7,24 +7,29 @@ from logging_config import setup_logging
 import sqlite3 as sql
 import datetime as dt
 from sync_state import sync_state
+import json
+from sync_state import update_saved_sync
 
 logger = setup_logging(__name__)
 
 class DatabaseConfig:
     _db_paths = {
         "wcmkt3": "wcmkt3.db", #testing database
+        "wcmkt2": "wcmkt2.db", #production database
         "sde": "sde.db",
         "build_cost": "buildcost.db",
     }
 
     _db_turso_urls = {
         "wcmkt3_turso": st.secrets.wcmkt3_turso.url,
+        "wcmkt2_turso": st.secrets.wcmkt2_turso.url,
         "sde_turso": st.secrets.sde_aws_turso.url,
         "build_cost_turso": st.secrets.buildcost_turso.url,
     }
 
     _db_turso_auth_tokens = {
         "wcmkt3_turso": st.secrets.wcmkt3_turso.token,
+        "wcmkt2_turso": st.secrets.wcmkt2_turso.token,
         "sde_turso": st.secrets.sde_aws_turso.token,
         "build_cost_turso": st.secrets.buildcost_turso.token,
     }
@@ -89,6 +94,8 @@ class DatabaseConfig:
         logger.info(f"Database synced at {update_time}")
         validation_test = self.validate_sync()
         st.session_state.sync_status = "Success" if validation_test else "Failed"
+        st.session_state.sync_check = False
+        update_saved_sync()
 
 
     def validate_sync(self)-> bool:

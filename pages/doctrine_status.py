@@ -14,7 +14,7 @@ from doctrines import create_fit_df
 from config import DatabaseConfig
 # Insert centralized logging configuration
 logger = setup_logging(__name__, log_file="doctrine_status.log")
-mkt_db = DatabaseConfig("wcmkt3")
+mkt_db = DatabaseConfig("wcmkt2")
 
 @st.cache_data(ttl=600, show_spinner="Loading cacheddoctrine fits...")
 def get_fit_summary():
