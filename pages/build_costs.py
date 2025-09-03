@@ -650,21 +650,36 @@ def initialise_session_state():
         logger.error(f"Error checking industry index expiry: {e}")
 
 @st.fragment()
-def display_material_costs(results: dict, selected_structure: str, item_id: str):
+def display_material_costs(results: dict, selected_structure: str, structure_names_for_materials: list):
     """
     Display material costs for a selected structure with proper formatting.
 
     Args:
         results: Dictionary containing cost calculation results from get_costs
         selected_structure: Name of the selected structure
-        item_id: The type_id of the item being manufactured
+        structure_names_for_materials: List of structure names for materials
     """
-    if selected_structure not in results:
+            # Default to the structure selected in sidebar if available
+    default_index = 0
+    if selected_structure and selected_structure in structure_names_for_materials:
+        default_index = structure_names_for_materials.index(selected_structure)
+
+    selected_structure_for_materials = st.selectbox(
+        "Select a structure to view material breakdown:",
+        structure_names_for_materials,
+        index=default_index,
+        key="material_structure_selector",
+        help="Choose a structure to see detailed material costs and quantities",
+    )
+    if st.session_state.material_structure_selector:
+        st.toast(f"Selected structure: {selected_structure_for_materials}", icon="✅")
+
+    if selected_structure_for_materials not in results:
         st.error(f"No data found for structure: {selected_structure}")
         return
 
     # Get materials data from results
-    materials_data = results[selected_structure]["materials"]
+    materials_data = results[selected_structure_for_materials]["materials"]
 
     # Get type names for materials
     type_ids = [int(k) for k in materials_data.keys()]
@@ -701,9 +716,9 @@ def display_material_costs(results: dict, selected_structure: str, item_id: str)
     df["cost_percentage"] = df["cost"] / total_material_cost
 
     # Display header
-    st.subheader(f"Material Breakdown - {selected_structure}")
+    st.subheader(f"Material Breakdown {selected_structure_for_materials}")
     st.markdown(
-        f"**Total Material Cost:** {millify(total_material_cost, precision=2)} ISK ({millify(total_material_volume, precision=2)} m³) - {material_price_source}"
+        f"{st.session_state.selected_item_for_display} Material Cost: <span style='color: orange;'>**{millify(total_material_cost, precision=2)} ISK**</span> (*{millify(total_material_volume, precision=2)} m³*) - {material_price_source}",unsafe_allow_html=True
     )
 
     # Configure columns with proper formatting
@@ -1120,46 +1135,8 @@ def main():
             list(results.keys())
         )  # Sort alphabetically
 
-        # Default to the structure selected in sidebar if available
-        default_index = 0
-        if selected_structure and selected_structure in structure_names_for_materials:
-            default_index = structure_names_for_materials.index(selected_structure)
-
-        selected_structure_for_materials = st.selectbox(
-            "Select a structure to view material breakdown:",
-            structure_names_for_materials,
-            index=default_index,
-            key="material_structure_selector",
-            help="Choose a structure to see detailed material costs and quantities",
-        )
-
-        if selected_structure_for_materials:
-            # Get the job item_id from current or cached parameters
-            if calculate_clicked:
-                job = JobQuery(
-                    item=selected_item,
-                    item_id=type_id,
-                    group_id=group_id,
-                    runs=runs,
-                    me=me,
-                    te=te,
-                    material_prices=st.session_state.price_source,
-                )
-                current_item_id = str(job.item_id)
-            else:
-                cached_job = JobQuery(
-                    item=st.session_state.current_job_params["item"],
-                    item_id=st.session_state.current_job_params["item_id"],
-                    group_id=st.session_state.current_job_params["group_id"],
-                    runs=st.session_state.current_job_params["runs"],
-                    me=st.session_state.current_job_params["me"],
-                    te=st.session_state.current_job_params["te"],
-                    material_prices=st.session_state.current_job_params["price_source"],
-                )
-                current_item_id = str(cached_job.item_id)
-
-            display_material_costs(
-                results, selected_structure_for_materials, current_item_id
+        display_material_costs(
+                results, selected_structure, structure_names_for_materials
             )
 
     else:
