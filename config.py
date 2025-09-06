@@ -92,8 +92,10 @@ class DatabaseConfig:
         st.session_state.last_sync = sync_info['last_sync']
         st.session_state.next_sync = sync_info['next_sync']
         logger.info(f"Database synced at {update_time}")
-        validation_test = self.validate_sync()
-        st.session_state.sync_status = "Success" if validation_test else "Failed"
+
+        if self.alias == "wcmkt2":
+            validation_test = self.validate_sync()
+            st.session_state.sync_status = "Success" if validation_test else "Failed"
         st.session_state.sync_check = False
         update_saved_sync()
 
@@ -168,4 +170,5 @@ class DatabaseConfig:
 
 
 if __name__ == "__main__":
-    pass
+    db = DatabaseConfig("build_cost")
+    db.sync()

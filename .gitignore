@@ -70,3 +70,7 @@ proj_config.py
 tests.py
 wcmkt*
 archive/
+buildcost.db* -
+buildcost.db*
+buildcost.db
+buildcost.db
