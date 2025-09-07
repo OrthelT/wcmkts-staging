@@ -38,6 +38,11 @@ class DatabaseConfig:
         if alias not in self._db_paths:
             raise ValueError(f"Unknown database alias '{alias}'. "
                              f"Available: {list(self._db_paths.keys())}")
+        if alias == "wcmkt2": #wcmkt2 is the production database, wcmkt3 is the testing database. remove this line before pushing to production.
+            self.alias = "wcmkt3"
+            logger.warning("DB assignment overridden to testing database for wcmkt (wcmkt3)")
+        else:
+            self.alias = alias
 
         self.alias = alias
         self.path = self._db_paths[alias]
@@ -93,12 +98,11 @@ class DatabaseConfig:
         st.session_state.next_sync = sync_info['next_sync']
         logger.info(f"Database synced at {update_time}")
 
-        if self.alias == "wcmkt2":
+        if self.alias == "wcmkt2" or self.alias == "wcmkt3":
             validation_test = self.validate_sync()
             st.session_state.sync_status = "Success" if validation_test else "Failed"
         st.session_state.sync_check = False
         update_saved_sync()
-
 
     def validate_sync(self)-> bool:
         alias = self.alias

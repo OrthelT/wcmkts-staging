@@ -1,3 +1,5 @@
+import os
+import pathlib
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -538,7 +540,45 @@ def get_market_data(show_all, selected_categories, selected_items):
 
     return sell_df, buy_df, stats
 
-if __name__ == "__main__":
-    last = get_time_since_esi_update()
+def verify_db_path(path):
+    if not os.path.exists(path):
+        logger.warning(f"DB path does not exist: {path}")
+        return False
+    return True
 
-    print(last)
+
+def init_db():
+    db_paths = {
+        "wcmkt3": "wcmkt3.db", #testing database
+        "wcmkt2": "wcmkt2.db", #production database
+        "sde": "sde.db",
+        "build_cost": "buildcost.db",
+    }
+    mkt_db = DatabaseConfig("wcmkt2")
+    mkt_db3 = DatabaseConfig("wcmkt3")
+    sde_db = DatabaseConfig("sde")
+    build_cost_db = DatabaseConfig("build_cost")
+
+    for key, value in db_paths.items():
+        alias = key
+        db_path = value
+        db = DatabaseConfig(alias)
+        try:
+            if verify_db_path(db.path):
+                logger.info(f"DB path exists: {db.path}")
+                status = {key: "success" if verify_db_path(db.path) else "failed"}
+            else:
+                logger.warning(f"DB path does not exist: {db.path}")
+                logger.info("syncing db")
+                logger.info(f"syncing db: {db.path}")
+                db.sync()
+        except Exception as e:
+                logger.error(f"Error syncing db: {e}")
+                raise e
+        status = {key: "success" if verify_db_path(db.path) else "failed"}
+    for key, value in status.items():
+        logger.info(f"init_db() status: {key}: {value}")
+    return True
+
+if __name__ == "__main__":
+    pass

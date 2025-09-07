@@ -250,6 +250,18 @@ def display_sync_status():
         st.sidebar.success("Database sync completed successfully!")
 
 def main():
+
+    result = init_db()
+    if result:
+        logger.info("DB initialized successfully")
+    else:
+        logger.error("DB initialization failed")
+        st.error("DB initialization failed")
+        st.stop()
+        return
+    mkt_db = DatabaseConfig("wcmkt2")
+    sde_db = DatabaseConfig("sde")
+    build_cost_db = DatabaseConfig("build_cost")
     logger.info("Starting main function")
     logger.info(mkt_db.path)
 
@@ -270,19 +282,6 @@ def main():
         st.rerun()
     else:
         logger.info(f"No sync needed: last sync: {last_sync}, next sync: {next_sync}\n")
-
-    # if check_sync_status():
-    #     logger.info("Sync needed, syncing now")
-    #     mkt_db.sync()
-    #     t2 = time.perf_counter()
-    #     elapsed_time = (t2-t1)*1000
-    #     logger.info(f"TIME sync_db() = {elapsed_time} ms")
-    #     st.session_state.sync_status = "Success"
-    #     st.session_state.update_time = get_update_time()
-    #     logger.info(f"Sync status updated to: {st.session_state.sync_status}\n, last sync: {st.session_state.last_sync}\n, next sync: {st.session_state.next_sync}\n")
-    #     st.rerun()
-    # else:
-    #     logger.info(f"No sync needed: last sync: {st.session_state.last_sync}, next sync: {st.session_state.next_sync}\n")
 
     wclogo = "images/wclogo.png"
     st.image(wclogo, width=150)
