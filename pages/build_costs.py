@@ -831,11 +831,11 @@ def main():
 
     index = categories.index("Ship")
 
-    # This is an experimental feature, that significantly speeds up the calculation time.
+    # This turns on asynchronous mode, an experimental feature that significantly speeds up the calculation time. This is now enabled by default. Set to False and use synchronous mode if you experience issues.
     async_mode = st.sidebar.checkbox(
         "Async Mode",
-        value=False,
-        help="This is an experimental feature, that significantly speeds up the calculation time.",
+        value=True,
+        help="This turns on asynchronous mode, an experimental feature that significantly speeds up the calculation time. This is now enabled by default. Set to False and use synchronous mode if you experience issues.",
     )
     if async_mode:
         st.session_state.async_mode = True
