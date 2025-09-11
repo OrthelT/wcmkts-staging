@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 import streamlit as st
 from logging_config import setup_logging
-
+from sqlalchemy import text
 import requests
 from config import DatabaseConfig
 
@@ -104,4 +104,6 @@ def fetch_industry_system_cost_indices():
 
 
 if __name__ == "__main__":
-    pass
+    db = DatabaseConfig('wcmkt2')
+    cols = db.get_table_columns('doctrines')
+    print(cols)

@@ -259,7 +259,17 @@ def main():
         st.error("DB initialization failed")
         st.stop()
         return
-    mkt_db = DatabaseConfig("wcmkt2")
+
+    #temorary to make sure the class is resetting the db path
+    db = "wcmkt2"
+    mkt_db = DatabaseConfig(db)
+
+    #todo: remove this in production
+    logger.info(f"original db path: {db}")
+    logger.info(f"new db path: {mkt_db.path}")
+    logger.info(f"reset this in production")
+    logger.info("-"*100)
+
     sde_db = DatabaseConfig("sde")
     build_cost_db = DatabaseConfig("build_cost")
     logger.info("Starting main function")

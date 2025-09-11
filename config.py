@@ -35,15 +35,13 @@ class DatabaseConfig:
     }
 
     def __init__(self, alias: str, dialect: str = "sqlite+libsql"):
+        if alias == "wcmkt2": #wcmkt2 is the production database, wcmkt3 is the testing database. remove this line before pushing to production.
+            alias = "wcmkt3"
+            logger.warning("DB assignment overridden to testing database for wcmkt (wcmkt3)")
+
         if alias not in self._db_paths:
             raise ValueError(f"Unknown database alias '{alias}'. "
                              f"Available: {list(self._db_paths.keys())}")
-        if alias == "wcmkt2": #wcmkt2 is the production database, wcmkt3 is the testing database. remove this line before pushing to production.
-            self.alias = "wcmkt3"
-            logger.warning("DB assignment overridden to testing database for wcmkt (wcmkt3)")
-        else:
-            self.alias = alias
-
         self.alias = alias
         self.path = self._db_paths[alias]
         self.url = f"{dialect}:///{self.path}"
@@ -174,5 +172,4 @@ class DatabaseConfig:
 
 
 if __name__ == "__main__":
-    db = DatabaseConfig("build_cost")
-    db.sync()
+    pass
