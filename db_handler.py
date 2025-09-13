@@ -548,6 +548,8 @@ def verify_db_path(path):
 
 
 def init_db():
+    """ This function checks to see if the databases are available locally. If not, it will sync the databases from the remote server using the configuration in given in the config.py file, using credentials stored in the .streamlit/secrets.toml (for local development) or st.secrets (for production). This code was designed to be used with sqlite embedded-replica databases hosted on Turso Cloud.
+    """
 
     mkt_db = DatabaseConfig("wcmkt")
     sde_db = DatabaseConfig("sde")
