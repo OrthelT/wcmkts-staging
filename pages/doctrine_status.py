@@ -17,7 +17,7 @@ logger = setup_logging(__name__, log_file="doctrine_status.log")
 mkt_db = DatabaseConfig("wcmkt2")
 
 @st.cache_data(ttl=600, show_spinner="Loading cacheddoctrine fits...")
-def get_fit_summary():
+def get_fit_summary()->pd.DataFrame:
     """Get a summary of all doctrine fits"""
     logger.info("Getting fit summary")
 
@@ -210,6 +210,8 @@ def get_ship_stock_list(ship_names: list):
                 logger.info(f"Querying database for {ship}")
                 if ship == "Ferox Navy Issue":
                     where_clause = "type_name = 'Ferox Navy Issue' AND fit_id = 473"
+                elif ship == "Hurricane Fleet Issue":
+                    where_clause = "type_name = 'Hurricane Fleet Issue' AND fit_id = 494"
                 else:
                     where_clause = f"type_name = '{ship}'"
 

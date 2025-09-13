@@ -91,7 +91,7 @@ def categorize_ship_by_role(ship_name: str) -> str:
 
     # DPS - Primary damage dealers
     dps_ships = {
-        'Hurricane', 'Ferox', 'Zealot', 'Purifier', 'Tornado', 'Oracle',
+        'Hurricane', 'Hurricane Fleet Issue', 'Ferox', 'Zealot', 'Purifier', 'Tornado', 'Oracle',
         'Harbinger', 'Brutix', 'Myrmidon', 'Talos', 'Naga', 'Rokh',
         'Megathron', 'Hyperion', 'Dominix', 'Raven', 'Scorpion Navy Issue',
         'Raven Navy Issue', 'Typhoon', 'Tempest', 'Maelstrom', 'Abaddon',
@@ -270,7 +270,7 @@ def display_low_stock_modules(selected_data: pd.DataFrame, doctrine_modules: pd.
         st.markdown("*Summary of the stock status of the three lowest stock modules for each ship in the selected doctrine. Numbers in parentheses represent the number of fits that can be supported with the current stock of the item. Use the checkboxes to select items for export to a CSV file.*")
         st.markdown("---")
 
-        exceptions = {21: 123, 75: 473}
+        exceptions = {21: 123, 75: 473, 84: 494}
 
         if selected_doctrine_id in exceptions:
             lead_fit_id = exceptions[selected_doctrine_id]

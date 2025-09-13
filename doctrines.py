@@ -1,3 +1,6 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import pandas as pd
 from sqlalchemy import text
@@ -113,7 +116,6 @@ def create_fit_df()->pd.DataFrame:
     summary_df = get_fit_summary(fits)
     return master_df, summary_df
 
-
 def get_fit_summary(fits:list = None)->pd.DataFrame:
     """Get a summary of all doctrine fits"""
     # Add all the fit summary rows if needed (for a summary view)
@@ -136,4 +138,4 @@ def get_fit_info()->pd.DataFrame:
 
 
 if __name__ == "__main__":
-    fit_info = get_fit_info()
+    pass
