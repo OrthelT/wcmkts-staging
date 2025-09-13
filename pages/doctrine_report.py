@@ -426,7 +426,6 @@ def main():
     # Fetch the data
     master_df, fit_summary = create_fit_df()
 
-
     if fit_summary.empty:
         st.warning("No doctrine fits found in the database.")
         return

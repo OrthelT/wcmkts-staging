@@ -8,9 +8,7 @@ backup/
 .vscode/
 # Database files
 market_data.*
-wcmkt2.db-*
-market.db
-sde2.db-*
+*.db*
 
 # Python
 __pycache__/

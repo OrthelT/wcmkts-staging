@@ -346,7 +346,6 @@ def main():
 
     logger.info(f"Selected item: {selected_item}")
 
-
     t1 = time.perf_counter()
 
     sell_data, buy_data, stats = get_market_data(show_all, selected_categories, selected_items)
