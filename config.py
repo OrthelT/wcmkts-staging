@@ -13,6 +13,9 @@ from sync_state import update_saved_sync
 logger = setup_logging(__name__)
 
 class DatabaseConfig:
+
+    wcdbmap = "wcmkt2" #master config variable for the database to use
+
     _db_paths = {
         "wcmkt3": "wcmkt3.db", #testing database
         "wcmkt2": "wcmkt2.db", #production database
@@ -35,9 +38,8 @@ class DatabaseConfig:
     }
 
     def __init__(self, alias: str, dialect: str = "sqlite+libsql"):
-        if alias == "wcmkt2": #wcmkt2 is the production database, wcmkt3 is the testing database. remove this line before pushing to production.
-            alias = "wcmkt3"
-            logger.warning("DB assignment overridden to testing database for wcmkt (wcmkt3)")
+        if alias == "wcmkt":
+            alias = self.wcdbmap
 
         if alias not in self._db_paths:
             raise ValueError(f"Unknown database alias '{alias}'. "

@@ -13,7 +13,7 @@ import datetime
 import json
 from config import DatabaseConfig
 
-mkt_db = DatabaseConfig("wcmkt2")
+mkt_db = DatabaseConfig("wcmkt")
 sde_db = DatabaseConfig("sde")
 build_cost_db = DatabaseConfig("build_cost")
 
@@ -548,16 +548,15 @@ def verify_db_path(path):
 
 
 def init_db():
-    db_paths = {
-        "wcmkt3": "wcmkt3.db", #testing database
-        "wcmkt2": "wcmkt2.db", #production database
-        "sde": "sde.db",
-        "build_cost": "buildcost.db",
-    }
-    mkt_db = DatabaseConfig("wcmkt2")
-    mkt_db3 = DatabaseConfig("wcmkt3")
+
+    mkt_db = DatabaseConfig("wcmkt")
     sde_db = DatabaseConfig("sde")
     build_cost_db = DatabaseConfig("build_cost")
+    db_paths = {
+        mkt_db.alias: mkt_db.path,
+        sde_db.alias: sde_db.path,
+        build_cost_db.alias: build_cost_db.path,
+    }
 
     for key, value in db_paths.items():
         alias = key

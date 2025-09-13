@@ -14,7 +14,7 @@ from config import DatabaseConfig
 
 logger = setup_logging(__name__, log_file="experiments.log")
 
-mktdb = DatabaseConfig("wcmkt2")
+mktdb = DatabaseConfig("wcmkt")
 
 icon_id = 0
 icon_url = f"https://images.evetech.net/types/{icon_id}/render?size=64"

@@ -6,7 +6,7 @@ from sqlalchemy import text
 import requests
 from config import DatabaseConfig
 
-mkt_db = DatabaseConfig("wcmkt2")
+mkt_db = DatabaseConfig("wcmkt")
 sde_db = DatabaseConfig("sde")
 build_cost_db = DatabaseConfig("build_cost")
 
@@ -104,6 +104,4 @@ def fetch_industry_system_cost_indices():
 
 
 if __name__ == "__main__":
-    db = DatabaseConfig('wcmkt2')
-    cols = db.get_table_columns('doctrines')
-    print(cols)
+    pass

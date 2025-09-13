@@ -26,7 +26,7 @@ logger.info("Application started")
 logger.info(f"streamlit version: {st.__version__}")
 logger.info("-"*100)
 
-mkt_db = DatabaseConfig("wcmkt2")
+mkt_db = DatabaseConfig("wcmkt")
 sde_db = DatabaseConfig("sde")
 
 # Function to get unique categories and item names
@@ -260,16 +260,6 @@ def main():
         st.stop()
         return
 
-    #temorary to make sure the class is resetting the db path
-    db = "wcmkt2"
-    mkt_db = DatabaseConfig(db)
-
-    #todo: remove this in production
-    logger.info(f"original db path: {db}")
-    logger.info(f"new db path: {mkt_db.path}")
-    logger.info(f"reset this in production")
-    logger.info("-"*100)
-
     sde_db = DatabaseConfig("sde")
     build_cost_db = DatabaseConfig("build_cost")
     logger.info("Starting main function")
@@ -345,6 +335,7 @@ def main():
         st.sidebar.text(f"Item: {selected_item}")
 
     logger.info(f"Selected item: {selected_item}")
+
 
     t1 = time.perf_counter()
 
@@ -593,6 +584,7 @@ def main():
     # Display sync status in sidebar
     with st.sidebar:
         display_sync_status()
+        st.sidebar.text(f"Database: {mkt_db.alias}")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ SHIP_TARGETS = {
     'default': 20  # Default target if ship not found
 }
 
-mktdb = DatabaseConfig("wcmkt2")
+mktdb = DatabaseConfig("wcmkt")
 
 def get_target_value(ship_name):
     """Get the target value for a ship type"""
