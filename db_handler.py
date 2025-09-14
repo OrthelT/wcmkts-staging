@@ -22,7 +22,6 @@ local_sde_url = sde_db.url
 build_cost_url = build_cost_db.url
 local_mkt_db = mkt_db.path
 
-# Load environment variables
 logger = setup_logging(__name__)
 
 # Use environment variables for production
@@ -32,12 +31,6 @@ mkt_auth_token = mkt_db.token
 sde_url = sde_db.turso_url
 sde_auth_token = sde_db.token
 
-
-mkt_query = """
-    SELECT * FROM marketorders
-    WHERE is_buy_order = 1
-    ORDER BY order_id
-"""
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def execute_query_with_retry(session, query):
@@ -292,10 +285,10 @@ def get_module_fits(type_id):
 
     with Session(mkt_db.engine) as session:
         query = f"""
-            SELECT * FROM doctrines WHERE type_id = {type_id}
+            SELECT * FROM doctrines WHERE type_id = :type_id
             """
         try:
-            fit = session.execute(text(query))
+            fit = session.execute(text(query), {'type_id': type_id})
             fit = fit.fetchall()
             df = pd.DataFrame(fit)
         except Exception as e:
@@ -402,23 +395,6 @@ def get_market_data(show_all, selected_categories, selected_items):
                 JOIN invCategories ic ON ig.categoryID = ic.categoryID
                 WHERE {sde_where}
             """
-
-            # with Session(get_local_sde_engine()) as session:
-            #     try:
-            #         logger.info(f"executing SDE query")
-            #         result = session.execute(text(sde_query))
-            #         filtered_type_ids = [str(row[0]) for row in result.fetchall()]
-            #         logger.info(f"filtered_type_ids: {filtered_type_ids}")
-            #         session.close()
-            #     except Exception as e:
-            #         logger.error(f"Error executing SDE query: {e}")
-
-            # try:
-            #     logger.info(f"filtered_type_ids: {len(filtered_type_ids)}")
-            #     if not filtered_type_ids:
-            #         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()  # Return empty DataFrames for both values
-            # except Exception as e:
-            #     logger.error(f"Error executing SDE query: {e}")
 
     # Get sell orders
     sell_conditions = ["is_buy_order = 0"]

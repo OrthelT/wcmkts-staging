@@ -174,10 +174,10 @@ def get_module_stock_list(module_names: list):
                 query = f"""
                     SELECT type_name, type_id, total_stock, fits_on_mkt
                     FROM doctrines
-                    WHERE type_name = '{module_name}'
+                    WHERE type_name = :module_name
                     LIMIT 1
             """
-                result = session.execute(text(query))
+                result = session.execute(text(query), {'module_name': module_name})
                 row = result.fetchone()
                 if row and row[2] is not None:  # total_stock is now at index 2
                     # Use market stock (total_stock)
