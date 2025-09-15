@@ -28,19 +28,19 @@ def get_module_stock_list(module_names: list):
     if not st.session_state.get('csv_module_list_state'):
         st.session_state.csv_module_list_state = {}
 
-    with Session(mktdb.libsql_local_connect) as session:
+    with Session(mktdb.engine) as session:
         for module_name in module_names:
             # Check if the module is already in the list, if not, get the data from the database
             if module_name not in st.session_state.module_list_state:
                 logger.info(f"Querying database for {module_name}")
 
-                query = f"""
+                query = """
                     SELECT type_name, type_id, total_stock, fits_on_mkt
                     FROM doctrines
-                    WHERE type_name = "{module_name}"
+                    WHERE type_name = :module_name
                     LIMIT 1
                 """
-                result = session.execute(text(query))
+                result = session.execute(text(query), {'module_name': module_name})
                 row = result.fetchone()
                 if row and row[2] is not None:  # total_stock is now at index 2
                     # Use market stock (total_stock)

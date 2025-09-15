@@ -126,8 +126,7 @@ def main():
     st.title("Winter Coalition Market Low Stock Alert")
     st.markdown("""
     This page shows items that are running low on the market. The **Days Remaining** column shows how many days of sales
-    can be sustained by the current stock based on historical average sales. Items with fewer days remaining need attention. The **Used In Fits** column
-    shows the doctrine ships that use the item (if any) and the number of fits that the current market stock of the item can support.
+    can be sustained by the current stock based on historical average sales. Items with fewer days remaining need attention. The **Used In Fits** column shows the doctrine ships that use the item (if any) and the number of fits that the current market stock of the item can support.
     """)
 
     # Sidebar filters
@@ -197,10 +196,10 @@ def main():
         display_df = display_df[columns_to_show]
 
         numeric_formats = {
-            'total_volume_remain': st.column_config.NumberColumn('Volume Remaining',  format='localized'),
-            'price': st.column_config.NumberColumn('Price', format='localized'),
-            'days_remaining': st.column_config.NumberColumn('Days Remaining', format='localized'),
-            'avg_volume': st.column_config.NumberColumn('Avg Vol', format='localized'),
+            'total_volume_remain': st.column_config.NumberColumn('Volume Remaining',  format='localized', help='total items currently available on the market'),
+            'price': st.column_config.NumberColumn('Price', format='localized', help='lowest 5-percentile price of current sell orders, or if no sell orders, the historical average price'),
+            'days_remaining': st.column_config.NumberColumn('Days Remaining', format='localized', help='days of stock remaining based on historical average sales for the last 30 days'),
+            'avg_volume': st.column_config.NumberColumn('Avg Vol', format='localized', help='average volume over the last 30 days'),
         }
         # Rename columns
         column_renames = {

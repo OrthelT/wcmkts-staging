@@ -40,6 +40,7 @@ class DatabaseConfig:
     def __init__(self, alias: str, dialect: str = "sqlite+libsql"):
         if alias == "wcmkt":
             alias = self.wcdbmap
+            logger.info(f'using wcmkt alias: {alias}')
         elif alias == "wcmkt2" or alias == "wcmkt3":
             logger.warning(f"Alias {alias} is deprecated, using {self.wcdbmap} instead")
             alias = self.wcdbmap
