@@ -735,24 +735,41 @@ def is_valid_image_url(url: str) -> bool:
         return False
 
 
-def display_data(df: pd.DataFrame, selected_structure: str | None = None):
+def display_data(df: pd.DataFrame, selected_structure: str | None = None, is_t2: bool = False):
+    # Check if dataframe has invention columns
+    has_invention = "invention_cost_per_unit" in df.columns
+
     if selected_structure:
         selected_structure_df = df[df.index == selected_structure]
-        selected_total_cost = selected_structure_df["total_cost"].values[0]
-        selected_total_cost_per_unit = selected_structure_df[
-            "total_cost_per_unit"
-        ].values[0]
+
+        # Use appropriate cost columns based on whether we have invention costs
+        if has_invention:
+            selected_total_cost = selected_structure_df["total_production_cost"].values[0]
+            selected_total_cost_per_unit = selected_structure_df["total_production_cost_per_unit"].values[0]
+        else:
+            selected_total_cost = selected_structure_df["total_cost"].values[0]
+            selected_total_cost_per_unit = selected_structure_df["total_cost_per_unit"].values[0]
+
         st.markdown(
             f"**Selected structure:** <span style='color: orange;'>{selected_structure}</span> <br>    *Total cost:* <span style='color: orange;'>{millify(selected_total_cost, precision=2)}</span> <br>    *Cost per unit:* <span style='color: orange;'>{millify(selected_total_cost_per_unit, precision=2)}</span>",
             unsafe_allow_html=True,
         )
 
-        df["comparison_cost"] = df["total_cost"].apply(
-            lambda x: x - selected_total_cost
-        )
-        df["comparison_cost_per_unit"] = df["total_cost_per_unit"].apply(
-            lambda x: x - selected_total_cost_per_unit
-        )
+        # Create comparison columns based on appropriate cost type
+        if has_invention:
+            df["comparison_cost"] = df["total_production_cost"].apply(
+                lambda x: x - selected_total_cost
+            )
+            df["comparison_cost_per_unit"] = df["total_production_cost_per_unit"].apply(
+                lambda x: x - selected_total_cost_per_unit
+            )
+        else:
+            df["comparison_cost"] = df["total_cost"].apply(
+                lambda x: x - selected_total_cost
+            )
+            df["comparison_cost_per_unit"] = df["total_cost_per_unit"].apply(
+                lambda x: x - selected_total_cost_per_unit
+            )
 
     col_order = [
         "_index",
@@ -767,6 +784,13 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
         "system_cost_index",
         "structure_rigs",
     ]
+
+    # Add invention columns if present
+    if has_invention:
+        col_order.insert(5, "invention_cost_per_unit")
+        col_order.insert(6, "total_production_cost_per_unit")
+        col_order.insert(7, "total_production_cost")
+
     if selected_structure:
         col_order.insert(2, "comparison_cost")
         col_order.insert(3, "comparison_cost_per_unit")
@@ -781,14 +805,14 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
             "units", help="Number of units built", width=60
         ),
         "total_cost": st.column_config.NumberColumn(
-            "total cost",
-            help="Total cost of building the units",
+            "mfg cost" if has_invention else "total cost",
+            help="Manufacturing cost only" if has_invention else "Total cost of building the units",
             format="localized",
             step=1
         ),
         "total_cost_per_unit": st.column_config.NumberColumn(
-            "cost per unit",
-            help="Cost per unit of the item",
+            "mfg cost/unit" if has_invention else "cost per unit",
+            help="Manufacturing cost per unit only" if has_invention else "Cost per unit of the item",
             format="localized",
             step=1,
         ),
@@ -817,6 +841,27 @@ def display_data(df: pd.DataFrame, selected_structure: str | None = None):
             help="Rigs fitted to the structure",
         ),
     }
+
+    # Add invention column configs if present
+    if has_invention:
+        col_config["invention_cost_per_unit"] = st.column_config.NumberColumn(
+            "invention cost/unit",
+            help="Average invention cost per unit (using best decryptor)",
+            format="localized",
+            step=1,
+        )
+        col_config["total_production_cost_per_unit"] = st.column_config.NumberColumn(
+            "total prod cost/unit",
+            help="Total production cost per unit (manufacturing + invention)",
+            format="localized",
+            step=1,
+        )
+        col_config["total_production_cost"] = st.column_config.NumberColumn(
+            "total production cost",
+            help="Total production cost (manufacturing + invention) for all units",
+            format="localized",
+            step=1,
+        )
 
     if selected_structure:
         col_config.update(
@@ -1834,10 +1879,46 @@ def main():
             lambda x: ", ".join(x)
         )
 
-        build_cost_df = build_cost_df.sort_values(by="total_cost", ascending=True)
-        total_cost = build_cost_df["total_cost"].min()
-        low_cost = build_cost_df["total_cost_per_unit"].min()
-        low_cost_structure = build_cost_df["total_cost_per_unit"].idxmin()
+        # Add invention costs if available (T2 items)
+        invention_cost_per_unit = 0.0
+        best_decryptor_name = None
+        if is_t2 and st.session_state.invention_costs is not None:
+            # Find the best (lowest) invention cost per unit
+            invention_results = st.session_state.invention_costs
+            best_invention_cost = float('inf')
+
+            for decryptor_name, inv_data in invention_results.items():
+                cost = inv_data.get("avg_cost_per_unit", 0)
+                if cost < best_invention_cost:
+                    best_invention_cost = cost
+                    best_decryptor_name = decryptor_name
+
+            invention_cost_per_unit = best_invention_cost if best_invention_cost != float('inf') else 0.0
+
+            # Add invention cost columns to dataframe
+            build_cost_df["invention_cost_per_unit"] = invention_cost_per_unit
+            build_cost_df["total_production_cost_per_unit"] = (
+                build_cost_df["total_cost_per_unit"] + invention_cost_per_unit
+            )
+            build_cost_df["total_production_cost"] = (
+                build_cost_df["total_cost"] + (invention_cost_per_unit * build_cost_df["units"])
+            )
+
+            # Sort by total production cost instead
+            build_cost_df = build_cost_df.sort_values(by="total_production_cost", ascending=True)
+        else:
+            build_cost_df = build_cost_df.sort_values(by="total_cost", ascending=True)
+
+        # Get lowest cost metrics (now includes invention if T2)
+        if is_t2 and st.session_state.invention_costs is not None:
+            total_cost = build_cost_df["total_production_cost"].min()
+            low_cost = build_cost_df["total_production_cost_per_unit"].min()
+            low_cost_structure = build_cost_df["total_production_cost_per_unit"].idxmin()
+        else:
+            total_cost = build_cost_df["total_cost"].min()
+            low_cost = build_cost_df["total_cost_per_unit"].min()
+            low_cost_structure = build_cost_df["total_cost_per_unit"].idxmin()
+
         low_cost = float(low_cost)
         material_cost = float(
             build_cost_df.loc[low_cost_structure, "total_material_cost"]
@@ -1857,28 +1938,59 @@ def main():
                 st.image(alt_url, width='stretch')
         with col2:
             st.header(f"Build cost for {selected_item}", divider="violet")
-            st.write(
-                f"Build cost for {selected_item} with {runs} runs, {me} ME, {te} TE, {price_source} material price (type_id: {type_id})"
-            )
+            if is_t2 and st.session_state.invention_costs is not None:
+                st.write(
+                    f"T2 Production cost for {selected_item} with {runs} runs, {me} ME, {te} TE, {price_source} material price (type_id: {type_id})"
+                )
+            else:
+                st.write(
+                    f"Build cost for {selected_item} with {runs} runs, {me} ME, {te} TE, {price_source} material price (type_id: {type_id})"
+                )
 
             col1, col2 = st.columns([0.5, 0.5])
             with col1:
-                st.metric(
-                    label="Build cost per unit",
-                    value=f"{millify(low_cost, precision=2)} ISK",
-                    help=f"Based on the lowest cost structure: {low_cost_structure}",
-                )
-                st.markdown(
-                    f"**Materials:** {millify(material_cost_per_unit, precision=2)} ISK | **Job cost:** {millify(job_cost_per_unit, precision=2)} ISK"
-                )
+                if is_t2 and st.session_state.invention_costs is not None:
+                    st.metric(
+                        label="Total Production Cost per unit",
+                        value=f"{millify(low_cost, precision=2)} ISK",
+                        help=f"Manufacturing + Invention | Structure: {low_cost_structure}",
+                    )
+                    manufacturing_cost_per_unit = low_cost - invention_cost_per_unit
+                    st.markdown(
+                        f"**Manufacturing:** {millify(manufacturing_cost_per_unit, precision=2)} ISK | "
+                        f"**Invention:** {millify(invention_cost_per_unit, precision=2)} ISK"
+                    )
+                    st.caption(f"*Using {best_decryptor_name}*")
+                else:
+                    st.metric(
+                        label="Build cost per unit",
+                        value=f"{millify(low_cost, precision=2)} ISK",
+                        help=f"Based on the lowest cost structure: {low_cost_structure}",
+                    )
+                    st.markdown(
+                        f"**Materials:** {millify(material_cost_per_unit, precision=2)} ISK | **Job cost:** {millify(job_cost_per_unit, precision=2)} ISK"
+                    )
             with col2:
-                st.metric(
-                    label="Total Build Cost",
-                    value=f"{millify(total_cost, precision=2)} ISK",
-                )
-                st.markdown(
-                    f"**Materials:** {millify(material_cost, precision=2)} ISK | **Job cost:** {millify(job_cost, precision=2)} ISK"
-                )
+                if is_t2 and st.session_state.invention_costs is not None:
+                    st.metric(
+                        label="Total Production Cost",
+                        value=f"{millify(total_cost, precision=2)} ISK",
+                        help=f"Manufacturing + Invention for {units} units"
+                    )
+                    manufacturing_total = total_cost - (invention_cost_per_unit * units)
+                    invention_total = invention_cost_per_unit * units
+                    st.markdown(
+                        f"**Manufacturing:** {millify(manufacturing_total, precision=2)} ISK | "
+                        f"**Invention:** {millify(invention_total, precision=2)} ISK"
+                    )
+                else:
+                    st.metric(
+                        label="Total Build Cost",
+                        value=f"{millify(total_cost, precision=2)} ISK",
+                    )
+                    st.markdown(
+                        f"**Materials:** {millify(material_cost, precision=2)} ISK | **Job cost:** {millify(job_cost, precision=2)} ISK"
+                    )
 
         if vale_price:
             profit_per_unit_vale = vale_price - low_cost
@@ -1904,7 +2016,7 @@ def main():
 
 
         display_df, col_config, col_order = display_data(
-            build_cost_df, selected_structure
+            build_cost_df, selected_structure, is_t2
         )
         st.dataframe(
             display_df,
