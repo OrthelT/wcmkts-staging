@@ -34,11 +34,90 @@ RETRIES = 2  # light retry; scale if API is flaky
 
 build_cost_db = DatabaseConfig("build_cost")
 build_cost_url = build_cost_db.url
+sde_db = DatabaseConfig("sde")
+sde_url = sde_db.url
 
 valid_structures = [35827, 35825, 35826]
 super_shipyard_id = 1046452498926
 
 logger = setup_logging(__name__)
+
+# Decryptor type IDs and their display names
+DECRYPTORS = {
+    "None (No Decryptor)": None,
+    "Accelerant Decryptor": 34201,
+    "Attainment Decryptor": 34202,
+    "Augmentation Decryptor": 34203,
+    "Parity Decryptor": 34204,
+    "Process Decryptor": 34205,
+    "Symmetry Decryptor": 34206,
+    "Optimized Attainment Decryptor": 34207,
+    "Optimized Augmentation Decryptor": 34208,
+}
+
+@st.cache_data(ttl=3600)
+def is_t2_item(type_id: int) -> bool:
+    """Check if item is Tech II (requires invention)
+
+    Tech II items have metaGroupID = 2 in the SDE database.
+
+    Args:
+        type_id: EVE Online type ID to check
+
+    Returns:
+        True if item is Tech II, False otherwise
+    """
+    engine = sa.create_engine(sde_url)
+    with engine.connect() as conn:
+        result = conn.execute(
+            sa.text("SELECT metaGroupID FROM sdeTypes WHERE typeID = :type_id AND metaGroupID = 2"),
+            {"type_id": type_id}
+        )
+        return result.fetchone() is not None
+
+@st.cache_data(ttl=3600)
+def get_t1_blueprint_for_t2_item(t2_item_id: int) -> int | None:
+    """Get the T1 blueprint ID needed to invent a T2 item
+
+    For invention, we need the T1 blueprint, not the T2 item ID.
+    This function queries the manufacturing API to find the blueprint relationship.
+
+    Args:
+        t2_item_id: Type ID of the T2 item
+
+    Returns:
+        T1 blueprint type ID, or None if not found
+
+    Note:
+        This queries the EVE Ref API's manufacturing endpoint for the T2 item,
+        which returns the T1 blueprint ID in the invention materials section.
+    """
+    try:
+        # Query the manufacturing API for the T2 item to get invention materials
+        url = f"https://api.everef.net/v1/industry/cost?product_id={t2_item_id}&runs=1&material_prices=ESI_AVG"
+
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Check if there's invention data in the response
+        if "invention" in data and data["invention"]:
+            # The invention section has the T2 blueprint as the key
+            # Get the first (and usually only) entry
+            for t2_bp_id, inv_data in data["invention"].items():
+                # The blueprint_id field in invention data IS the T1 blueprint we need
+                if "blueprint_id" in inv_data:
+                    t1_bp_id = inv_data["blueprint_id"]
+                    logger.info(f"Found T1 blueprint {t1_bp_id} for T2 item {t2_item_id}")
+                    return t1_bp_id
+
+        logger.warning(f"No invention data found for T2 item {t2_item_id}")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error looking up T1 blueprint for {t2_item_id}: {e}")
+        return None
 
 @dataclass
 class JobQuery:
@@ -53,6 +132,23 @@ class JobQuery:
     material_prices: str = (
         "ESI_AVG"  # default to ESI_AVG, other valid options: "Jita Sell", "Jita Buy"
     )
+
+    # Invention-specific fields
+    calculate_invention: bool = False
+    decryptor_id: int | None = None
+    invention_structure: str | None = None  # Structure name for invention
+
+    # Skills (for invention calculations)
+    science: int = 5
+    advanced_industry: int = 5
+    industry: int = 5
+    amarr_encryption: int = 5
+    caldari_encryption: int = 5
+    gallente_encryption: int = 5
+    minmatar_encryption: int = 5
+    triglavian_encryption: int = 5
+    upwell_encryption: int = 5
+    sleeper_encryption: int = 5
 
     def __post_init__(self):
         if self.group_id in [30, 659]:
@@ -91,6 +187,63 @@ class JobQuery:
         formatted_rigs = [f"&rig_id={str(rig)}" for rig in clean_rig_ids]
         rigs = "".join(formatted_rigs)
         url = f"https://api.everef.net/v1/industry/cost?product_id={self.item_id}&runs={self.runs}&me={self.me}&te={self.te}&structure_type_id={structure.structure_type_id}&security={self.security}{rigs}&system_cost_bonus={self.system_cost_bonus}&manufacturing_cost={system_cost_index}&facility_tax={tax}&material_prices={self.material_prices}"
+        return url
+
+    def construct_invention_url(self, structure, decryptor_id: int | None = None):
+        """Construct URL for invention cost calculation
+
+        Args:
+            structure: Structure object with rig and system information
+            decryptor_id: Optional decryptor type ID (34201-34208), None for no decryptor
+
+        Returns:
+            URL string for EVE Ref API invention cost endpoint
+
+        Note:
+            The invention API does not accept structure_type_id or rig_id parameters.
+            It only uses system cost index and facility tax from the structure.
+            For T2 items, this converts the T2 item ID to the T1 blueprint ID needed for invention.
+        """
+        # For T2 items, get the T1 blueprint ID
+        blueprint_id = get_t1_blueprint_for_t2_item(self.item_id)
+
+        if blueprint_id is None:
+            raise ValueError(f"Could not find T1 blueprint for T2 item {self.item_id}")
+
+        # Get system cost index and facility tax from structure
+        system_id = structure.system_id
+        system_cost_index = get_manufacturing_cost_index(system_id)
+        tax = structure.tax
+
+        # Build base parameters for invention
+        # Note: Do NOT include structure_type_id or rig_id - API doesn't accept them for invention
+        base_params = [
+            f"blueprint_id={blueprint_id}",  # Use T1 blueprint ID, not T2 item ID
+            f"runs={self.runs}",
+            f"science={self.science}",
+            f"advanced_industry={self.advanced_industry}",
+            f"industry={self.industry}",
+            f"amarr_encryption_methods={self.amarr_encryption}",
+            f"caldari_encryption_methods={self.caldari_encryption}",
+            f"gallente_encryption_methods={self.gallente_encryption}",
+            f"minmatar_encryption_methods={self.minmatar_encryption}",
+            f"triglavian_encryption_methods={self.triglavian_encryption}",
+            f"upwell_encryption_methods={self.upwell_encryption}",
+            f"sleeper_encryption_methods={self.sleeper_encryption}",
+            f"security={self.security}",
+            f"system_cost_bonus={self.system_cost_bonus}",
+            f"invention_cost={system_cost_index}",
+            f"facility_tax={tax}",
+            f"material_prices={self.material_prices}"
+        ]
+
+        # Add decryptor if specified
+        if decryptor_id:
+            base_params.append(f"decryptor_id={decryptor_id}")
+
+        # Construct URL without rigs
+        params_str = "&".join(base_params)
+        url = f"https://api.everef.net/v1/industry/cost?{params_str}"
         return url
 
 @st.cache_data(ttl=3600)
@@ -383,6 +536,142 @@ async def get_costs_async(job: JobQuery) -> tuple[dict, dict]:
 
     return results, status_log
 
+async def fetch_one_invention(
+    client: httpx.AsyncClient,
+    url: str,
+    decryptor_name: str,
+    job: JobQuery,
+):
+    """Fetch invention costs for a single decryptor
+
+    Args:
+        client: HTTPX async client
+        url: API endpoint URL
+        decryptor_name: Name of the decryptor (for logging)
+        job: JobQuery object with item information
+
+    Returns:
+        Tuple of (decryptor_name, result_dict, error_string)
+    """
+    try:
+        r = await client.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+
+        # Check for invention data in response
+        if "invention" not in data:
+            return decryptor_name, None, "No invention data in response"
+
+        invention_data = data["invention"]
+
+        # The invention section is keyed by the T2 blueprint ID
+        # We need to find the right key (there should only be one)
+        if not invention_data:
+            return decryptor_name, None, "Invention data is empty"
+
+        # Get the first (and usually only) blueprint's invention data
+        bp_id = list(invention_data.keys())[0]
+        bp_invention_data = invention_data[bp_id]
+
+        return (
+            decryptor_name,
+            {
+                "probability": bp_invention_data.get("probability", 0),
+                "runs_per_copy": bp_invention_data.get("runs_per_copy", 0),
+                "expected_copies": bp_invention_data.get("expected_copies", 0),
+                "expected_runs": bp_invention_data.get("expected_runs", 0),
+                "expected_units": bp_invention_data.get("expected_units", 0),
+                "me": bp_invention_data.get("me", 0),
+                "te": bp_invention_data.get("te", 0),
+                "materials": bp_invention_data.get("materials", {}),
+                "total_material_cost": bp_invention_data.get("total_material_cost", 0),
+                "total_cost": bp_invention_data.get("total_cost", 0),
+                "avg_cost_per_copy": bp_invention_data.get("avg_cost_per_copy", 0),
+                "avg_cost_per_run": bp_invention_data.get("avg_cost_per_run", 0),
+                "avg_cost_per_unit": bp_invention_data.get("avg_cost_per_unit", 0),
+            },
+            None,
+        )
+    except Exception as e:
+        return decryptor_name, None, str(e)
+
+async def get_invention_costs_async(job: JobQuery, structure: Structure) -> tuple[dict, dict]:
+    """Get invention costs for all decryptors asynchronously
+
+    Args:
+        job: JobQuery object with invention parameters (skills, etc.)
+        structure: Structure object for the invention facility
+
+    Returns:
+        Tuple of (results_dict, status_log_dict)
+        results_dict maps decryptor_name -> invention_cost_data
+    """
+    results = {}
+    status_log = {
+        "req_count": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "success_log": {},
+        "error_log": {},
+    }
+
+    # Reduce connection limits to be more gentle on the server
+    limits = httpx.Limits(
+        max_connections=MAX_CONCURRENCY, max_keepalive_connections=MAX_CONCURRENCY
+    )
+    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+
+    async def fetch_with_semaphore(client, url, decryptor_name, job):
+        async with semaphore:
+            return await fetch_one_invention(client, url, decryptor_name, job)
+
+    # Add headers to identify your application
+    headers = {
+        "User-Agent": "WCMKTS-BuildCosts/1.0 (https://github.com/OrthelT/wcmkts_production; orthel.toralen@gmail.com)"
+    }
+
+    async with httpx.AsyncClient(http2=True, limits=limits, headers=headers) as client:
+        progress_bar = st.progress(
+            0, text=f"Fetching invention costs for {len(DECRYPTORS)} decryptor options..."
+        )
+
+        tasks = []
+        decryptor_list = list(DECRYPTORS.items())
+
+        # Create tasks for each decryptor
+        for decryptor_name, decryptor_id in decryptor_list:
+            url = job.construct_invention_url(structure, decryptor_id)
+            tasks.append(
+                fetch_with_semaphore(client, url, decryptor_name, job)
+            )
+
+        # Process results as they complete
+        for i, coro in enumerate(asyncio.as_completed(tasks), start=1):
+            progress_bar.progress(i / len(decryptor_list), text=f"Fetching invention costs ({i}/{len(decryptor_list)})...")
+            decryptor_name, result, error = await coro
+            status_log["req_count"] += 1
+
+            if result:
+                results[decryptor_name] = result
+                status_log["success_count"] += 1
+                status_log["success_log"][decryptor_name] = (result, None)
+            if error:
+                status_log["error_count"] += 1
+                status_log["error_log"][decryptor_name] = (None, error)
+
+    # Log errors if needed
+    if status_log["error_count"] > 0:
+        for d, e in status_log["error_log"].items():
+            logger.error(f"Error fetching invention costs for {d}: {e}")
+
+    logger.info("="*80)
+    logger.info(f"Invention cost results for {len(decryptor_list)} decryptors:")
+    logger.info(f"Results count: {status_log['success_count']}")
+    logger.info(f"Errors count: {status_log['error_count']}")
+    logger.info("="*80)
+
+    return results, status_log
+
 def display_log_status(status: dict):
 
     logger.info("Status Report:")
@@ -619,6 +908,36 @@ def initialise_session_state():
         st.session_state.super = False
     if "async_mode" not in st.session_state:
         st.session_state.async_mode = False
+
+    # Invention-specific session state
+    if "invention_costs" not in st.session_state:
+        st.session_state.invention_costs = None
+    if "selected_decryptor" not in st.session_state:
+        st.session_state.selected_decryptor = "None (No Decryptor)"
+    if "selected_invention_structure" not in st.session_state:
+        st.session_state.selected_invention_structure = None
+    # Skill levels
+    if "science_level" not in st.session_state:
+        st.session_state.science_level = 5
+    if "advanced_industry_level" not in st.session_state:
+        st.session_state.advanced_industry_level = 5
+    if "industry_level" not in st.session_state:
+        st.session_state.industry_level = 5
+    if "amarr_encryption_level" not in st.session_state:
+        st.session_state.amarr_encryption_level = 5
+    if "caldari_encryption_level" not in st.session_state:
+        st.session_state.caldari_encryption_level = 5
+    if "gallente_encryption_level" not in st.session_state:
+        st.session_state.gallente_encryption_level = 5
+    if "minmatar_encryption_level" not in st.session_state:
+        st.session_state.minmatar_encryption_level = 5
+    if "triglavian_encryption_level" not in st.session_state:
+        st.session_state.triglavian_encryption_level = 5
+    if "upwell_encryption_level" not in st.session_state:
+        st.session_state.upwell_encryption_level = 5
+    if "sleeper_encryption_level" not in st.session_state:
+        st.session_state.sleeper_encryption_level = 5
+
     st.session_state.initialised = True
 
     try:
@@ -773,6 +1092,296 @@ def display_material_costs(results: dict, selected_structure: str, structure_nam
     st.info(
         "💡 **Tip:** You can download this data as CSV using the download icon (⬇️) in the top-right corner of the table above."
     )
+
+
+@st.fragment()
+def display_invention_costs(invention_results: dict, invention_structure_name: str):
+    """Display invention costs comparison table for all decryptors
+
+    Args:
+        invention_results: Dictionary mapping decryptor_name -> cost_data
+        invention_structure_name: Name of the structure used for invention
+    """
+    if not invention_results:
+        st.warning("No invention cost data available.")
+        return
+
+    st.subheader(f"Invention Costs - {invention_structure_name}")
+    st.markdown(
+        f"Comparing invention outcomes for all decryptor options. "
+        f"Select a decryptor to view detailed material breakdown below."
+    )
+
+    # Build DataFrame from invention results
+    invention_list = []
+    for decryptor_name, data in invention_results.items():
+        invention_list.append({
+            "decryptor": decryptor_name,
+            "success_chance": data.get("probability", 0) * 100,  # Convert to percentage
+            "raw_cost_per_run": data.get("total_material_cost", 0),
+            "avg_cost_per_copy": data.get("avg_cost_per_copy", 0),
+            "avg_cost_per_run": data.get("avg_cost_per_run", 0),
+            "avg_cost_per_unit": data.get("avg_cost_per_unit", 0),
+            "me": data.get("me", 0),
+            "te": data.get("te", 0),
+            "runs_per_copy": data.get("runs_per_copy", 0),
+            "expected_runs": data.get("expected_runs", 0),
+            "expected_units": data.get("expected_units", 0),
+        })
+
+    df = pd.DataFrame(invention_list)
+
+    # Sort by avg_cost_per_unit (lowest first)
+    df = df.sort_values(by="avg_cost_per_unit", ascending=True)
+
+    # Find best values for highlighting
+    best_cost_per_unit = df["avg_cost_per_unit"].min()
+    best_success_chance = df["success_chance"].max()
+    lowest_raw_cost = df["raw_cost_per_run"].min()
+
+    # Add highlighting indicators
+    df["best_cost"] = df["avg_cost_per_unit"] == best_cost_per_unit
+    df["best_success"] = df["success_chance"] == best_success_chance
+    df["lowest_raw"] = df["raw_cost_per_run"] == lowest_raw_cost
+
+    st.markdown("### Decryptor Comparison Table")
+
+    # Column configuration
+    column_config = {
+        "decryptor": st.column_config.TextColumn(
+            "Decryptor",
+            help="Type of decryptor used (or None)",
+            width="medium"
+        ),
+        "success_chance": st.column_config.NumberColumn(
+            "Success %",
+            help="Probability of successful invention",
+            format="%.1f%%",
+            width="small"
+        ),
+        "raw_cost_per_run": st.column_config.NumberColumn(
+            "Raw Cost (per run)",
+            help="Cost of materials for each invention attempt (datacores + decryptor + job costs)",
+            format="localized",
+            width="medium"
+        ),
+        "avg_cost_per_copy": st.column_config.NumberColumn(
+            "Avg Cost/Copy",
+            help="Average cost per successful blueprint copy (accounting for failures)",
+            format="localized",
+            width="small"
+        ),
+        "avg_cost_per_run": st.column_config.NumberColumn(
+            "Avg Cost/Run",
+            help="Average cost per run of the invented blueprint",
+            format="localized",
+            width="small"
+        ),
+        "avg_cost_per_unit": st.column_config.NumberColumn(
+            "Avg Cost/Unit",
+            help="Average invention cost per final manufactured unit",
+            format="localized",
+            width="small"
+        ),
+        "me": st.column_config.NumberColumn(
+            "ME",
+            help="Material Efficiency of the invented blueprint",
+            format="%d",
+            width="small"
+        ),
+        "te": st.column_config.NumberColumn(
+            "TE",
+            help="Time Efficiency of the invented blueprint",
+            format="%d",
+            width="small"
+        ),
+        "runs_per_copy": st.column_config.NumberColumn(
+            "Runs/Copy",
+            help="Licensed production runs per invented blueprint copy",
+            format="%d",
+            width="small"
+        ),
+        "best_cost": st.column_config.CheckboxColumn(
+            "Best Cost",
+            help="Lowest average cost per unit",
+            width="small"
+        ),
+        "best_success": st.column_config.CheckboxColumn(
+            "Best Success",
+            help="Highest success chance",
+            width="small"
+        ),
+        "lowest_raw": st.column_config.CheckboxColumn(
+            "Lowest Raw",
+            help="Lowest raw cost per run",
+            width="small"
+        ),
+    }
+
+    # Display the dataframe
+    st.dataframe(
+        df,
+        column_config=column_config,
+        column_order=[
+            "decryptor",
+            "success_chance",
+            "raw_cost_per_run",
+            "avg_cost_per_copy",
+            "avg_cost_per_run",
+            "avg_cost_per_unit",
+            "me",
+            "te",
+            "runs_per_copy",
+            "best_cost",
+            "best_success",
+            "lowest_raw",
+        ],
+        hide_index=True,
+        width='stretch',
+        height=400,
+    )
+
+    # Key insights
+    best_overall = df.iloc[0]  # Already sorted by avg_cost_per_unit
+    best_success_row = df[df["best_success"] == True].iloc[0]
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(
+            "Best Cost/Unit",
+            f"{millify(best_overall['avg_cost_per_unit'], precision=2)} ISK",
+            help=f"Using {best_overall['decryptor']}"
+        )
+        st.caption(f"**{best_overall['decryptor']}**")
+
+    with col2:
+        st.metric(
+            "Highest Success Rate",
+            f"{best_success_row['success_chance']:.1f}%",
+            help=f"Using {best_success_row['decryptor']}"
+        )
+        st.caption(f"**{best_success_row['decryptor']}**")
+
+    with col3:
+        st.metric(
+            "Expected Units per Attempt",
+            f"{best_overall['expected_units']:.0f}",
+            help=f"Using {best_overall['decryptor']}"
+        )
+        st.caption(f"ME: {best_overall['me']}, TE: {best_overall['te']}")
+
+    # Material breakdown section
+    st.markdown("---")
+    st.markdown("### Invention Material Breakdown")
+
+    decryptor_names = list(invention_results.keys())
+    selected_decryptor = st.selectbox(
+        "Select a decryptor to view material breakdown:",
+        decryptor_names,
+        index=decryptor_names.index(best_overall['decryptor']) if best_overall['decryptor'] in decryptor_names else 0,
+        key="invention_decryptor_selector",
+        help="Choose a decryptor to see detailed material requirements for invention",
+    )
+
+    if selected_decryptor in invention_results:
+        decryptor_data = invention_results[selected_decryptor]
+        materials_data = decryptor_data.get("materials", {})
+
+        if materials_data:
+            # Get type names for materials
+            type_ids = [int(k) for k in materials_data.keys()]
+            type_names = request_type_names(type_ids)
+            type_names_dict = {item["id"]: item["name"] for item in type_names}
+
+            # Build materials list
+            materials_list = []
+            for type_id_str, material_info in materials_data.items():
+                type_id = int(type_id_str)
+                type_name = type_names_dict.get(type_id, f"Unknown ({type_id})")
+
+                materials_list.append({
+                    "type_id": type_id,
+                    "type_name": type_name,
+                    "quantity": material_info["quantity"],
+                    "cost_per_unit": material_info["cost_per_unit"],
+                    "cost": material_info["cost"],
+                })
+
+            # Create DataFrame
+            materials_df = pd.DataFrame(materials_list)
+            materials_df = materials_df.sort_values(by="cost", ascending=False)
+
+            # Calculate percentages
+            total_material_cost = materials_df["cost"].sum()
+            materials_df["cost_percentage"] = materials_df["cost"] / total_material_cost
+
+            st.markdown(
+                f"**{selected_decryptor}** - Total Material Cost: <span style='color: orange;'>**{millify(total_material_cost, precision=2)} ISK**</span> per invention attempt",
+                unsafe_allow_html=True
+            )
+
+            # Configure columns
+            mat_column_config = {
+                "type_name": st.column_config.TextColumn(
+                    "Material",
+                    help="The name of the material required",
+                    width="medium"
+                ),
+                "quantity": st.column_config.NumberColumn(
+                    "Quantity",
+                    help="Amount of material needed per invention attempt",
+                    format="localized",
+                    width="small",
+                ),
+                "cost_per_unit": st.column_config.NumberColumn(
+                    "Unit Price",
+                    help="Cost per unit of material (ISK)",
+                    format="localized",
+                    width="small",
+                ),
+                "cost": st.column_config.NumberColumn(
+                    "Total Cost",
+                    help="Total cost for this material (ISK)",
+                    format="compact",
+                    width="small",
+                ),
+                "cost_percentage": st.column_config.NumberColumn(
+                    "% of Total",
+                    help="Percentage of total material cost",
+                    format="percent",
+                    width="small",
+                ),
+            }
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.dataframe(
+                    materials_df,
+                    column_config=mat_column_config,
+                    column_order=[
+                        "type_name",
+                        "quantity",
+                        "cost_per_unit",
+                        "cost",
+                        "cost_percentage",
+                    ],
+                    hide_index=True,
+                    width='stretch',
+                )
+
+            with col2:
+                st.bar_chart(
+                    materials_df,
+                    x="type_name",
+                    y="cost",
+                    y_label="",
+                    x_label="",
+                    horizontal=True,
+                    width='content',
+                    height=310,
+                )
+        else:
+            st.info("No material data available for this decryptor.")
 
 
 def main():
@@ -941,6 +1550,112 @@ def main():
             help="Select a structure to compare the cost to build versus this structure. This is optional and will default to all structures.",
         )
 
+    # Check if item is T2 and show invention options
+    is_t2 = is_t2_item(type_id) if type_id else False
+
+    if is_t2:
+        st.sidebar.divider()
+        st.sidebar.markdown("### Invention Settings")
+
+        # Structure selection for invention
+        with st.sidebar.expander("Invention Structure (required for T2)"):
+            selected_invention_structure = st.selectbox(
+                "Select structure for invention:",
+                structure_names,
+                index=0 if structure_names else None,
+                help="Select the structure where invention will take place. Structure bonuses apply to invention costs.",
+                key="invention_structure_selector"
+            )
+            st.session_state.selected_invention_structure = selected_invention_structure
+
+        # Skills configuration (collapsible)
+        with st.sidebar.expander("Skills Configuration"):
+            st.markdown("**Core Skills**")
+            st.session_state.science_level = st.slider(
+                "Science",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.science_level,
+                help="+4% invention success chance per level",
+                key="science_slider"
+            )
+            st.session_state.advanced_industry_level = st.slider(
+                "Advanced Industry",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.advanced_industry_level,
+                help="Reduces invention job costs",
+                key="advanced_industry_slider"
+            )
+            st.session_state.industry_level = st.slider(
+                "Industry",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.industry_level,
+                help="Reduces job time and costs",
+                key="industry_slider"
+            )
+
+            st.markdown("**Encryption Methods**")
+            st.caption("Select the encryption method that matches your item's race")
+
+            st.session_state.amarr_encryption_level = st.slider(
+                "Amarr Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.amarr_encryption_level,
+                help="+2% invention success per level (Amarr items)",
+                key="amarr_encryption_slider"
+            )
+            st.session_state.caldari_encryption_level = st.slider(
+                "Caldari Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.caldari_encryption_level,
+                help="+2% invention success per level (Caldari items)",
+                key="caldari_encryption_slider"
+            )
+            st.session_state.gallente_encryption_level = st.slider(
+                "Gallente Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.gallente_encryption_level,
+                help="+2% invention success per level (Gallente items)",
+                key="gallente_encryption_slider"
+            )
+            st.session_state.minmatar_encryption_level = st.slider(
+                "Minmatar Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.minmatar_encryption_level,
+                help="+2% invention success per level (Minmatar items)",
+                key="minmatar_encryption_slider"
+            )
+            st.session_state.triglavian_encryption_level = st.slider(
+                "Triglavian Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.triglavian_encryption_level,
+                help="+2% invention success per level (Triglavian items)",
+                key="triglavian_encryption_slider"
+            )
+            st.session_state.upwell_encryption_level = st.slider(
+                "Upwell Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.upwell_encryption_level,
+                help="+2% invention success per level (Upwell items)",
+                key="upwell_encryption_slider"
+            )
+            st.session_state.sleeper_encryption_level = st.slider(
+                "Sleeper Encryption Methods",
+                min_value=0,
+                max_value=5,
+                value=st.session_state.sleeper_encryption_level,
+                help="+2% invention success per level (Sleeper items)",
+                key="sleeper_encryption_slider"
+            )
+
     # Create job parameters for comparison
     current_job_params = {
         "item": selected_item,
@@ -950,6 +1665,16 @@ def main():
         "me": me,
         "te": te,
         "price_source": st.session_state.price_source,
+        # Include invention parameters if T2
+        "is_t2": is_t2,
+        "invention_structure": st.session_state.selected_invention_structure if is_t2 else None,
+        "science": st.session_state.science_level if is_t2 else None,
+        "advanced_industry": st.session_state.advanced_industry_level if is_t2 else None,
+        "industry": st.session_state.industry_level if is_t2 else None,
+        "amarr_encryption": st.session_state.amarr_encryption_level if is_t2 else None,
+        "caldari_encryption": st.session_state.caldari_encryption_level if is_t2 else None,
+        "gallente_encryption": st.session_state.gallente_encryption_level if is_t2 else None,
+        "minmatar_encryption": st.session_state.minmatar_encryption_level if is_t2 else None,
     }
     logger.info(f"Current job params: {current_job_params}")
     logger.info(
@@ -1010,6 +1735,18 @@ def main():
             me=me,
             te=te,
             material_prices=st.session_state.price_source,
+            # Invention parameters
+            calculate_invention=is_t2,
+            science=st.session_state.science_level,
+            advanced_industry=st.session_state.advanced_industry_level,
+            industry=st.session_state.industry_level,
+            amarr_encryption=st.session_state.amarr_encryption_level,
+            caldari_encryption=st.session_state.caldari_encryption_level,
+            gallente_encryption=st.session_state.gallente_encryption_level,
+            minmatar_encryption=st.session_state.minmatar_encryption_level,
+            triglavian_encryption=st.session_state.triglavian_encryption_level,
+            upwell_encryption=st.session_state.upwell_encryption_level,
+            sleeper_encryption=st.session_state.sleeper_encryption_level,
         )
         logger.info("=" * 80)
         logger.info("=" * 80)
@@ -1036,8 +1773,40 @@ def main():
         logger.info("=" * 80)
         logger.info("\n")
 
+        # Calculate invention costs if this is a T2 item
+        invention_results = None
+        if is_t2 and st.session_state.selected_invention_structure:
+            logger.info("=" * 80)
+            logger.info("Calculating invention costs (T2 item)")
+            logger.info("=" * 80)
+
+            # Get the structure object for invention
+            invention_structure_obj = fetch_structure_by_name(st.session_state.selected_invention_structure)
+
+            t3 = time.perf_counter()
+            try:
+                invention_results, invention_status = asyncio.run(
+                    get_invention_costs_async(job, invention_structure_obj)
+                )
+                t4 = time.perf_counter()
+                invention_elapsed = round((t4 - t3) * 1000, 2)
+
+                logger.info(f"Invention status: {invention_status['success_count']} success, {invention_status['error_count']} errors")
+                logger.info(f"TIME get_invention_costs_async() = {invention_elapsed} ms")
+
+                if invention_status['error_count'] > 0:
+                    st.warning(f"Some invention cost calculations failed ({invention_status['error_count']} errors). Results may be incomplete.")
+
+            except Exception as e:
+                logger.error(f"Error calculating invention costs: {e}")
+                st.error(f"Failed to calculate invention costs: {e}")
+                invention_results = None
+        elif is_t2 and not st.session_state.selected_invention_structure:
+            st.warning("⚠️ T2 item detected but no invention structure selected. Invention costs will not be calculated.")
+
         # Cache the results and parameters
         st.session_state.cost_results = results
+        st.session_state.invention_costs = invention_results
         st.session_state.current_job_params = current_job_params
         st.session_state.selected_item_for_display = selected_item
         st.rerun()
@@ -1162,6 +1931,15 @@ def main():
 
         display_material_costs(
                 results, selected_structure, structure_names_for_materials
+            )
+
+        # Invention costs section - show if T2 item and we have invention results
+        if is_t2 and st.session_state.invention_costs is not None:
+            st.markdown("---")
+            st.markdown("## Invention Costs")
+            display_invention_costs(
+                st.session_state.invention_costs,
+                st.session_state.selected_invention_structure
             )
 
     else:
