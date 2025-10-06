@@ -55,7 +55,6 @@ DECRYPTORS = {
     "Optimized Augmentation Decryptor": 34208,
 }
 
-@st.cache_data(ttl=3600)
 def is_t2_item(type_id: int) -> bool:
     """Check if item is Tech II (requires invention)
 
@@ -73,7 +72,10 @@ def is_t2_item(type_id: int) -> bool:
             sa.text("SELECT metaGroupID FROM sdeTypes WHERE typeID = :type_id AND metaGroupID = 2"),
             {"type_id": type_id}
         )
-        return result.fetchone() is not None
+        if type_id == 44996:
+            return False
+        else:
+            return result.fetchone() is not None
 
 @st.cache_data(ttl=3600)
 def get_t1_blueprint_for_t2_item(t2_item_id: int) -> int | None:
@@ -1153,17 +1155,17 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
 
     st.subheader(f"Invention Costs - {invention_structure_name}")
     st.markdown(
-        f"Comparing invention outcomes for all decryptor options. "
-        f"Select a decryptor to view detailed material breakdown below."
+        f"Comparing invention outcomes for all decryptor options."
     )
 
     # Build DataFrame from invention results
     invention_list = []
+    runs = st.session_state.current_job_params.get("runs", 1)
     for decryptor_name, data in invention_results.items():
         invention_list.append({
             "decryptor": decryptor_name,
             "success_chance": data.get("probability", 0) * 100,  # Convert to percentage
-            "raw_cost_per_run": data.get("total_material_cost", 0),
+            "raw_cost_per_run": data.get("total_material_cost", 0)/runs,
             "avg_cost_per_copy": data.get("avg_cost_per_copy", 0),
             "avg_cost_per_run": data.get("avg_cost_per_run", 0),
             "avg_cost_per_unit": data.get("avg_cost_per_unit", 0),
@@ -1287,6 +1289,7 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
     )
 
     # Key insights
+
     best_overall = df.iloc[0]  # Already sorted by avg_cost_per_unit
     best_success_row = df[df["best_success"] == True].iloc[0]
 
@@ -1314,119 +1317,6 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             help=f"Using {best_overall['decryptor']}"
         )
         st.caption(f"ME: {best_overall['me']}, TE: {best_overall['te']}")
-
-    # Material breakdown section
-    st.markdown("---")
-    st.markdown("### Invention Material Breakdown")
-
-    decryptor_names = list(invention_results.keys())
-    selected_decryptor = st.selectbox(
-        "Select a decryptor to view material breakdown:",
-        decryptor_names,
-        index=decryptor_names.index(best_overall['decryptor']) if best_overall['decryptor'] in decryptor_names else 0,
-        key="invention_decryptor_selector",
-        help="Choose a decryptor to see detailed material requirements for invention",
-    )
-
-    if selected_decryptor in invention_results:
-        decryptor_data = invention_results[selected_decryptor]
-        materials_data = decryptor_data.get("materials", {})
-
-        if materials_data:
-            # Get type names for materials
-            type_ids = [int(k) for k in materials_data.keys()]
-            type_names = request_type_names(type_ids)
-            type_names_dict = {item["id"]: item["name"] for item in type_names}
-
-            # Build materials list
-            materials_list = []
-            for type_id_str, material_info in materials_data.items():
-                type_id = int(type_id_str)
-                type_name = type_names_dict.get(type_id, f"Unknown ({type_id})")
-
-                materials_list.append({
-                    "type_id": type_id,
-                    "type_name": type_name,
-                    "quantity": material_info["quantity"],
-                    "cost_per_unit": material_info["cost_per_unit"],
-                    "cost": material_info["cost"],
-                })
-
-            # Create DataFrame
-            materials_df = pd.DataFrame(materials_list)
-            materials_df = materials_df.sort_values(by="cost", ascending=False)
-
-            # Calculate percentages
-            total_material_cost = materials_df["cost"].sum()
-            materials_df["cost_percentage"] = materials_df["cost"] / total_material_cost
-
-            st.markdown(
-                f"**{selected_decryptor}** - Total Material Cost: <span style='color: orange;'>**{millify(total_material_cost, precision=2)} ISK**</span> per invention attempt",
-                unsafe_allow_html=True
-            )
-
-            # Configure columns
-            mat_column_config = {
-                "type_name": st.column_config.TextColumn(
-                    "Material",
-                    help="The name of the material required",
-                    width="medium"
-                ),
-                "quantity": st.column_config.NumberColumn(
-                    "Quantity",
-                    help="Amount of material needed per invention attempt",
-                    format="localized",
-                    width="small",
-                ),
-                "cost_per_unit": st.column_config.NumberColumn(
-                    "Unit Price",
-                    help="Cost per unit of material (ISK)",
-                    format="localized",
-                    width="small",
-                ),
-                "cost": st.column_config.NumberColumn(
-                    "Total Cost",
-                    help="Total cost for this material (ISK)",
-                    format="compact",
-                    width="small",
-                ),
-                "cost_percentage": st.column_config.NumberColumn(
-                    "% of Total",
-                    help="Percentage of total material cost",
-                    format="percent",
-                    width="small",
-                ),
-            }
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.dataframe(
-                    materials_df,
-                    column_config=mat_column_config,
-                    column_order=[
-                        "type_name",
-                        "quantity",
-                        "cost_per_unit",
-                        "cost",
-                        "cost_percentage",
-                    ],
-                    hide_index=True,
-                    width='stretch',
-                )
-
-            with col2:
-                st.bar_chart(
-                    materials_df,
-                    x="type_name",
-                    y="cost",
-                    y_label="",
-                    x_label="",
-                    horizontal=True,
-                    width='content',
-                    height=310,
-                )
-        else:
-            st.info("No material data available for this decryptor.")
 
 
 def main():
@@ -1554,8 +1444,20 @@ def main():
         st.rerun()
 
     runs = st.sidebar.number_input("Runs", min_value=1, max_value=100000, value=1)
-    me = st.sidebar.number_input("ME", min_value=0, max_value=10, value=0)
-    te = st.sidebar.number_input("TE", min_value=0, max_value=20, value=0)
+
+    # Check if item is T2 early to determine ME/TE handling
+    is_t2_early = is_t2_item(type_id) if type_id else False
+
+    if is_t2_early:
+        # For T2 items, ME/TE comes from invention (decryptor-dependent)
+        st.sidebar.info("ℹ️ **T2 Item**: ME/TE will be determined by the decryptor used for invention")
+        # Set dummy values - these will be overridden by invention results
+        me = 0
+        te = 0
+    else:
+        # For T1 items, allow user to set ME/TE
+        me = st.sidebar.number_input("ME", min_value=0, max_value=10, value=0)
+        te = st.sidebar.number_input("TE", min_value=0, max_value=20, value=0)
 
     st.sidebar.divider()
 
@@ -1595,23 +1497,49 @@ def main():
             help="Select a structure to compare the cost to build versus this structure. This is optional and will default to all structures.",
         )
 
-    # Check if item is T2 and show invention options
-    is_t2 = is_t2_item(type_id) if type_id else False
+    # Use the early T2 check (already computed above)
+    is_t2 = is_t2_early
 
     if is_t2:
         st.sidebar.divider()
         st.sidebar.markdown("### Invention Settings")
 
         # Structure selection for invention
-        with st.sidebar.expander("Invention Structure (required for T2)"):
+        with st.sidebar:
+            # Find default structure index (4-HWWF Lab)
+            default_structure = "4-HWWF - WinterCo. Laboratory Center"
+            default_index = 0
+            if default_structure in structure_names:
+                default_index = structure_names.index(default_structure)
+
             selected_invention_structure = st.selectbox(
                 "Select structure for invention:",
                 structure_names,
-                index=0 if structure_names else None,
+                index=default_index if structure_names else None,
                 help="Select the structure where invention will take place. Structure bonuses apply to invention costs.",
                 key="invention_structure_selector"
             )
             st.session_state.selected_invention_structure = selected_invention_structure
+
+        # Decryptor selection
+        with st.sidebar.expander("Decryptor Selection"):
+            decryptor_options = list(DECRYPTORS.keys())
+
+            # Initialize selected decryptor in session state if not present
+            if "selected_decryptor_for_costs" not in st.session_state:
+                st.session_state.selected_decryptor_for_costs = "Auto (Best Cost)"
+
+            # Add "Auto" option at the beginning
+            decryptor_options_with_auto = ["Auto (Best Cost)"] + decryptor_options
+
+            selected_decryptor = st.selectbox(
+                "Select decryptor for cost calculations:",
+                decryptor_options_with_auto,
+                index=decryptor_options_with_auto.index(st.session_state.selected_decryptor_for_costs),
+                help="Select which decryptor to use for build cost calculations. 'Auto' uses the lowest cost option.",
+                key="decryptor_cost_selector"
+            )
+            st.session_state.selected_decryptor_for_costs = selected_decryptor
 
         # Skills configuration (collapsible)
         with st.sidebar.expander("Skills Configuration"):
@@ -1720,6 +1648,7 @@ def main():
         "caldari_encryption": st.session_state.caldari_encryption_level if is_t2 else None,
         "gallente_encryption": st.session_state.gallente_encryption_level if is_t2 else None,
         "minmatar_encryption": st.session_state.minmatar_encryption_level if is_t2 else None,
+        "selected_decryptor": st.session_state.get("selected_decryptor_for_costs", "Auto (Best Cost)") if is_t2 else None,
     }
     logger.info(f"Current job params: {current_job_params}")
     logger.info(
@@ -1772,13 +1701,93 @@ def main():
         logger.info("Calculate button clicked, calculating")
         st.session_state.calculate_clicked = False
 
+        # For T2 items, we need to calculate invention FIRST to get the correct ME/TE
+        invention_results = None
+        invention_me = me
+        invention_te = te
+        selected_decryptor_for_me_te = None
+
+        if is_t2 and st.session_state.selected_invention_structure:
+            logger.info("=" * 80)
+            logger.info("Calculating invention costs FIRST (T2 item - need ME/TE)")
+            logger.info("=" * 80)
+
+            # Create temporary job for invention
+            temp_job = JobQuery(
+                item=st.session_state.selected_item_for_display,
+                item_id=type_id,
+                group_id=group_id,
+                runs=runs,
+                me=0,  # Placeholder, will be replaced
+                te=0,  # Placeholder, will be replaced
+                material_prices=st.session_state.price_source,
+                calculate_invention=is_t2,
+                science=st.session_state.science_level,
+                advanced_industry=st.session_state.advanced_industry_level,
+                industry=st.session_state.industry_level,
+                amarr_encryption=st.session_state.amarr_encryption_level,
+                caldari_encryption=st.session_state.caldari_encryption_level,
+                gallente_encryption=st.session_state.gallente_encryption_level,
+                minmatar_encryption=st.session_state.minmatar_encryption_level,
+                triglavian_encryption=st.session_state.triglavian_encryption_level,
+                upwell_encryption=st.session_state.upwell_encryption_level,
+                sleeper_encryption=st.session_state.sleeper_encryption_level,
+            )
+
+            # Get the structure object for invention
+            invention_structure_obj = fetch_structure_by_name(st.session_state.selected_invention_structure)
+
+            t_inv_start = time.perf_counter()
+            try:
+                invention_results, invention_status = asyncio.run(
+                    get_invention_costs_async(temp_job, invention_structure_obj)
+                )
+                t_inv_end = time.perf_counter()
+                invention_elapsed = round((t_inv_end - t_inv_start) * 1000, 2)
+
+                logger.info(f"Invention status: {invention_status['success_count']} success, {invention_status['error_count']} errors")
+                logger.info(f"TIME get_invention_costs_async() = {invention_elapsed} ms")
+
+                if invention_status['error_count'] > 0:
+                    st.warning(f"Some invention cost calculations failed ({invention_status['error_count']} errors). Results may be incomplete.")
+
+                # Extract ME/TE from selected decryptor
+                user_selection = st.session_state.get("selected_decryptor_for_costs", "Auto (Best Cost)")
+
+                if user_selection == "Auto (Best Cost)":
+                    # Find the best (lowest cost) decryptor
+                    best_invention_cost = float('inf')
+                    for decryptor_name, inv_data in invention_results.items():
+                        cost = inv_data.get("avg_cost_per_unit", 0)
+                        if cost < best_invention_cost:
+                            best_invention_cost = cost
+                            selected_decryptor_for_me_te = decryptor_name
+                else:
+                    selected_decryptor_for_me_te = user_selection
+
+                # Get ME/TE from the selected decryptor's invention results
+                if selected_decryptor_for_me_te and selected_decryptor_for_me_te in invention_results:
+                    invention_me = invention_results[selected_decryptor_for_me_te].get("me", 0)
+                    invention_te = invention_results[selected_decryptor_for_me_te].get("te", 0)
+                    logger.info(f"Using ME={invention_me}, TE={invention_te} from {selected_decryptor_for_me_te}")
+                else:
+                    logger.warning(f"Could not find ME/TE for decryptor {selected_decryptor_for_me_te}, using defaults")
+
+            except Exception as e:
+                logger.error(f"Error calculating invention costs: {e}")
+                st.error(f"Failed to calculate invention costs: {e}")
+                invention_results = None
+        elif is_t2 and not st.session_state.selected_invention_structure:
+            st.warning("⚠️ T2 item detected but no invention structure selected. Invention costs will not be calculated.")
+
+        # Now create the job with correct ME/TE
         job = JobQuery(
             item=st.session_state.selected_item_for_display,
             item_id=type_id,
             group_id=group_id,
             runs=runs,
-            me=me,
-            te=te,
+            me=invention_me,  # For T2: ME from invention, for T1: ME from sidebar
+            te=invention_te,  # For T2: TE from invention, for T1: TE from sidebar
             material_prices=st.session_state.price_source,
             # Invention parameters
             calculate_invention=is_t2,
@@ -1793,10 +1802,11 @@ def main():
             upwell_encryption=st.session_state.upwell_encryption_level,
             sleeper_encryption=st.session_state.sleeper_encryption_level,
         )
+
         logger.info("=" * 80)
         logger.info("=" * 80)
         logger.info("\n")
-        logger.info("get_costs()")
+        logger.info(f"get_costs() with ME={job.me}, TE={job.te}")
         logger.info("=" * 80)
         logger.info("=" * 80)
         logger.info("\n")
@@ -1818,42 +1828,22 @@ def main():
         logger.info("=" * 80)
         logger.info("\n")
 
-        # Calculate invention costs if this is a T2 item
-        invention_results = None
-        if is_t2 and st.session_state.selected_invention_structure:
-            logger.info("=" * 80)
-            logger.info("Calculating invention costs (T2 item)")
-            logger.info("=" * 80)
-
-            # Get the structure object for invention
-            invention_structure_obj = fetch_structure_by_name(st.session_state.selected_invention_structure)
-
-            t3 = time.perf_counter()
-            try:
-                invention_results, invention_status = asyncio.run(
-                    get_invention_costs_async(job, invention_structure_obj)
-                )
-                t4 = time.perf_counter()
-                invention_elapsed = round((t4 - t3) * 1000, 2)
-
-                logger.info(f"Invention status: {invention_status['success_count']} success, {invention_status['error_count']} errors")
-                logger.info(f"TIME get_invention_costs_async() = {invention_elapsed} ms")
-
-                if invention_status['error_count'] > 0:
-                    st.warning(f"Some invention cost calculations failed ({invention_status['error_count']} errors). Results may be incomplete.")
-
-            except Exception as e:
-                logger.error(f"Error calculating invention costs: {e}")
-                st.error(f"Failed to calculate invention costs: {e}")
-                invention_results = None
-        elif is_t2 and not st.session_state.selected_invention_structure:
-            st.warning("⚠️ T2 item detected but no invention structure selected. Invention costs will not be calculated.")
-
-        # Cache the results and parameters
+        # Cache the results and parameters (invention was already calculated above for T2 items)
         st.session_state.cost_results = results
         st.session_state.invention_costs = invention_results
         st.session_state.current_job_params = current_job_params
         st.session_state.selected_item_for_display = selected_item
+
+        # Store ME/TE information for display
+        if is_t2:
+            st.session_state.manufacturing_me = invention_me
+            st.session_state.manufacturing_te = invention_te
+            st.session_state.me_te_source = f"{selected_decryptor_for_me_te} (Invented BPC)"
+        else:
+            st.session_state.manufacturing_me = me
+            st.session_state.manufacturing_te = te
+            st.session_state.me_te_source = "User Input"
+
         st.rerun()
 
     # Display results if available (either fresh or cached)
@@ -1881,19 +1871,42 @@ def main():
 
         # Add invention costs if available (T2 items)
         invention_cost_per_unit = 0.0
-        best_decryptor_name = None
+        selected_decryptor_name = None
+
+        logger.info(f"runs: {st.session_state.current_job_params.get('runs', 1)}")
+
         if is_t2 and st.session_state.invention_costs is not None:
-            # Find the best (lowest) invention cost per unit
             invention_results = st.session_state.invention_costs
-            best_invention_cost = float('inf')
 
-            for decryptor_name, inv_data in invention_results.items():
-                cost = inv_data.get("avg_cost_per_unit", 0)
-                if cost < best_invention_cost:
-                    best_invention_cost = cost
-                    best_decryptor_name = decryptor_name
+        
 
-            invention_cost_per_unit = best_invention_cost if best_invention_cost != float('inf') else 0.0
+            # Check if user has selected a specific decryptor
+            user_selection = st.session_state.get("selected_decryptor_for_costs", "Auto (Best Cost)")
+
+            if user_selection == "Auto (Best Cost)":
+                # Find the best (lowest) invention cost per unit
+                best_invention_cost = float('inf')
+                for decryptor_name, inv_data in invention_results.items():
+                    cost = inv_data.get("avg_cost_per_unit", 0)
+                    if cost < best_invention_cost:
+                        best_invention_cost = cost
+                        selected_decryptor_name = decryptor_name
+                invention_cost_per_unit = best_invention_cost if best_invention_cost != float('inf') else 0.0
+            else:
+                # Use the user-selected decryptor
+                selected_decryptor_name = user_selection
+                if selected_decryptor_name in invention_results:
+                    invention_cost_per_unit = invention_results[selected_decryptor_name].get("avg_cost_per_unit", 0)
+                else:
+                    # Fallback to best cost if selected decryptor not found
+                    logger.warning(f"Selected decryptor {selected_decryptor_name} not found in results, using best cost")
+                    best_invention_cost = float('inf')
+                    for decryptor_name, inv_data in invention_results.items():
+                        cost = inv_data.get("avg_cost_per_unit", 0)
+                        if cost < best_invention_cost:
+                            best_invention_cost = cost
+                            selected_decryptor_name = decryptor_name
+                    invention_cost_per_unit = best_invention_cost if best_invention_cost != float('inf') else 0.0
 
             # Add invention cost columns to dataframe
             build_cost_df["invention_cost_per_unit"] = invention_cost_per_unit
@@ -1938,13 +1951,20 @@ def main():
                 st.image(alt_url, width='stretch')
         with col2:
             st.header(f"Build cost for {selected_item}", divider="violet")
+
+            # Get ME/TE values from session state (correctly shows invented BPC values for T2)
+            display_me = st.session_state.get("manufacturing_me", me)
+            display_te = st.session_state.get("manufacturing_te", te)
+            me_te_source = st.session_state.get("me_te_source", "User Input")
+
             if is_t2 and st.session_state.invention_costs is not None:
                 st.write(
-                    f"T2 Production cost for {selected_item} with {runs} runs, {me} ME, {te} TE, {price_source} material price (type_id: {type_id})"
+                    f"T2 Production cost for {selected_item} with {runs} runs, {price_source} material price (type_id: {type_id})"
                 )
+                st.info(f"📋 **Manufacturing BPC**: ME {display_me} / TE {display_te} from {me_te_source}")
             else:
                 st.write(
-                    f"Build cost for {selected_item} with {runs} runs, {me} ME, {te} TE, {price_source} material price (type_id: {type_id})"
+                    f"Build cost for {selected_item} with {runs} runs, ME {display_me}, TE {display_te}, {price_source} material price (type_id: {type_id})"
                 )
 
             col1, col2 = st.columns([0.5, 0.5])
@@ -1960,7 +1980,7 @@ def main():
                         f"**Manufacturing:** {millify(manufacturing_cost_per_unit, precision=2)} ISK | "
                         f"**Invention:** {millify(invention_cost_per_unit, precision=2)} ISK"
                     )
-                    st.caption(f"*Using {best_decryptor_name}*")
+                    st.caption(f"*Using {selected_decryptor_name}*")
                 else:
                     st.metric(
                         label="Build cost per unit",
