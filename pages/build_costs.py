@@ -1224,12 +1224,14 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             format="localized",
             width="small"
         ),
-        "avg_cost_per_unit": st.column_config.NumberColumn(
-            "Avg Cost/Unit",
-            help="Average invention cost per final manufactured unit",
+
+        "expected_runs": st.column_config.NumberColumn(
+            "Expected Runs",
+            help="Expected number of runs to produce the expected units",
             format="localized",
             width="small"
         ),
+
         "me": st.column_config.NumberColumn(
             "ME",
             help="Material Efficiency of the invented blueprint",
