@@ -1237,7 +1237,7 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             width="small"
         ),
         "raw_cost_per_run": st.column_config.NumberColumn(
-            "Raw Cost (per run)",
+            "Raw Cost (per invention attempt)",
             help="Cost of materials for each invention attempt (datacores + decryptor + job costs)",
             format="localized",
             width="medium"
@@ -1552,8 +1552,6 @@ def main():
                 key="invention_structure_selector"
             )
 
-            invention_runs = st.number_input("Invention Runs", min_value=1, max_value=100, value=1)
-            st.session_state.invention_runs = invention_runs
             st.session_state.selected_invention_structure = selected_invention_structure
 
         # Decryptor selection
