@@ -28,6 +28,8 @@ from db_handler import (
 from utils import update_industry_index, get_jita_price
 import datetime
 import time
+from build_cost_helpers import find_invention_rig
+
 API_TIMEOUT = 20.0
 MAX_CONCURRENCY = 6  # tune for the API's rate limits
 RETRIES = 2  # light retry; scale if API is flaky
@@ -217,10 +219,28 @@ class JobQuery:
         system_cost_index = get_manufacturing_cost_index(system_id)
         tax = structure.tax
 
-        # Build base parameters for invention
         # Note: Do NOT include structure_type_id or rig_id - API doesn't accept them for invention
         base_params = [
             f"blueprint_id={blueprint_id}",  # Use T1 blueprint ID, not T2 item ID
+            f"runs={self.runs}",
+            f"science={self.science}",
+            f"advanced_industry={self.advanced_industry}",
+            f"industry={self.industry}",
+            f"amarr_encryption_methods={self.amarr_encryption}",
+            f"caldari_encryption_methods={self.caldari_encryption}",
+            f"gallente_encryption_methods={self.gallente_encryption}",
+            f"minmatar_encryption_methods={self.minmatar_encryption}",
+            f"triglavian_encryption_methods={self.triglavian_encryption}",
+            f"upwell_encryption_methods={self.upwell_encryption}",
+            f"sleeper_encryption_methods={self.sleeper_encryption}",
+            f"security={self.security}",
+            f"system_cost_bonus={self.system_cost_bonus}",
+            f"invention_cost={system_cost_index}",
+            f"facility_tax={tax}",
+            f"material_prices={self.material_prices}"
+        ]
+        invention_params = [
+            f"product_id={self.item_id}",
             f"runs={self.runs}",
             f"science={self.science}",
             f"advanced_industry={self.advanced_industry}",
@@ -244,8 +264,8 @@ class JobQuery:
             base_params.append(f"decryptor_id={decryptor_id}")
 
         # Construct URL without rigs
-        params_str = "&".join(base_params)
-        url = f"https://api.everef.net/v1/industry/cost?{params_str}"
+        base_params_str = "&".join(base_params)
+        url = f"https://api.everef.net/v1/industry/cost?{base_params_str}"
         return url
 
 @st.cache_data(ttl=3600)
@@ -555,6 +575,11 @@ async def fetch_one_invention(
     Returns:
         Tuple of (decryptor_name, result_dict, error_string)
     """
+    logger.info("="*80)
+    logger.info(f"URL: {url}")
+    logger.info("="*80)
+
+
     try:
         r = await client.get(url, timeout=20)
         r.raise_for_status()
@@ -1161,6 +1186,9 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
     # Build DataFrame from invention results
     invention_list = []
     runs = st.session_state.current_job_params.get("runs", 1)
+    
+
+
     for decryptor_name, data in invention_results.items():
         invention_list.append({
             "decryptor": decryptor_name,
@@ -1172,8 +1200,10 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             "me": data.get("me", 0),
             "te": data.get("te", 0),
             "runs_per_copy": data.get("runs_per_copy", 0),
-            "expected_runs": data.get("expected_runs", 0),
+            "expected_runs": round(data.get("expected_runs", 0)/runs, 2),
             "expected_units": data.get("expected_units", 0),
+            "total_material_cost": data.get("total_material_cost", 0),
+
         })
 
     df = pd.DataFrame(invention_list)
@@ -1227,7 +1257,7 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
 
         "expected_runs": st.column_config.NumberColumn(
             "Expected Runs",
-            help="Expected number of runs to produce the expected units",
+            help="Expected number of runs per invention attempt",
             format="localized",
             width="small"
         ),
@@ -1277,7 +1307,7 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             "raw_cost_per_run",
             "avg_cost_per_copy",
             "avg_cost_per_run",
-            "avg_cost_per_unit",
+            "expected_runs",
             "me",
             "te",
             "runs_per_copy",
@@ -1521,6 +1551,9 @@ def main():
                 help="Select the structure where invention will take place. Structure bonuses apply to invention costs.",
                 key="invention_structure_selector"
             )
+
+            invention_runs = st.number_input("Invention Runs", min_value=1, max_value=100, value=1)
+            st.session_state.invention_runs = invention_runs
             st.session_state.selected_invention_structure = selected_invention_structure
 
         # Decryptor selection
@@ -1880,7 +1913,6 @@ def main():
         if is_t2 and st.session_state.invention_costs is not None:
             invention_results = st.session_state.invention_costs
 
-        
 
             # Check if user has selected a specific decryptor
             user_selection = st.session_state.get("selected_decryptor_for_costs", "Auto (Best Cost)")
