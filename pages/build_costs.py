@@ -1295,6 +1295,12 @@ def display_invention_costs(invention_results: dict, invention_structure_name: s
             help="Lowest raw cost per run",
             width="small"
         ),
+        "total_material_cost": st.column_config.NumberColumn(
+            "Total Material Cost",
+            help="Total material cost",
+            format="compact",
+            width="small",
+        ),
     }
 
     # Display the dataframe
