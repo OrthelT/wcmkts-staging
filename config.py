@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine, text, select, NullPool
 import streamlit as st
 import os
-#os.environ.setdefault("RUST_LOG", "debug")
+
+# os.environ.setdefault("RUST_LOG", "debug")
 import libsql
 from logging_config import setup_logging
 import sqlite3 as sql
@@ -13,6 +14,7 @@ from contextlib import suppress
 from time import perf_counter
 import tomllib
 from pathlib import Path
+
 logger = setup_logging(__name__)
 
 # =============================================================================
@@ -31,8 +33,9 @@ DEFAULT_SHIP_TARGET = 20
 # Global lock to serialize sync operations within the process
 _SYNC_LOCK = threading.Lock()
 
+
 @st.cache_data(ttl=3600)
-def get_settings()->dict:
+def get_settings() -> dict:
     """Get the settings from the settings.toml file."""
     settings_path = Path("settings.toml")
     try:
@@ -42,27 +45,29 @@ def get_settings()->dict:
         logger.error(f"Failed to load settings from settings.toml: {e}")
         raise e
 
+
 class DatabaseConfig:
     settings = get_settings()
-    wcdbmap = settings['env_db_aliases'][settings['env']['env']] #master config variable for the database to use
+    # master config variable for the database to use
+    wcdbmap = settings["env_db_aliases"][settings["env"]["env"]]
 
     _db_paths = {
-        "wcmktprod": settings['db_paths']['wcmktprod'], #production database
-        "sde": settings['db_paths']['sde'],
-        "build_cost": settings['db_paths']['build_cost'],
-        "wcmkttest": settings['db_paths']['wcmkttest'] #testing db
+        "wcmktprod": settings["db_paths"]["wcmktprod"],  # production database
+        "sde": settings["db_paths"]["sde"],
+        "build_cost": settings["db_paths"]["build_cost"],
+        "wcmkttest": settings["db_paths"]["wcmkttest"],  # testing db
     }
 
     _db_turso_urls = {
         "wcmktprod_turso": st.secrets.wcmktprod_turso.url,
-        "sde_turso": st.secrets.sdelite2_turso.url,
+        "sde_turso": st.secrets.sdelite_turso.url,
         "build_cost_turso": st.secrets.buildcost_turso.url,
         "wcmkttest_turso": st.secrets.wcmkttest_turso.url,
     }
 
     _db_turso_auth_tokens = {
         "wcmktprod_turso": st.secrets.wcmktprod_turso.token,
-        "sde_turso": st.secrets.sdelite2_turso.token,
+        "sde_turso": st.secrets.sdelite_turso.token,
         "build_cost_turso": st.secrets.buildcost_turso.token,
         "wcmkttest_turso": st.secrets.wcmkttest_turso.token,
     }
@@ -83,8 +88,10 @@ class DatabaseConfig:
             alias = self.wcdbmap
 
         if alias not in self._db_paths:
-            raise ValueError(f"Unknown database alias '{alias}'. "
-                             f"Available: {list(self._db_paths.keys())}")
+            raise ValueError(
+                f"Unknown database alias '{alias}'. "
+                f"Available: {list(self._db_paths.keys())}"
+            )
         self.alias = alias
         self.path = self._db_paths[alias]
         self.url = f"{dialect}:///{self.path}"
@@ -130,7 +137,9 @@ class DatabaseConfig:
     def libsql_sync_connect(self):
         conn = DatabaseConfig._libsql_sync_connects.get(self.alias)
         if conn is None:
-            conn = libsql.connect(self.path, sync_url=self.turso_url, auth_token=self.token)
+            conn = libsql.connect(
+                self.path, sync_url=self.turso_url, auth_token=self.token
+            )
             DatabaseConfig._libsql_sync_connects[self.alias] = conn
         return conn
 
@@ -149,11 +158,11 @@ class DatabaseConfig:
         if eng is not None:
             return eng
         else:
-        # URI form with read-only flags
+            # URI form with read-only flags
             uri = f"sqlite+pysqlite:///file:{self.path}?mode=ro&uri=true"
             eng = create_engine(
                 uri,
-                poolclass=NullPool,                  # no long-lived pooled handles
+                poolclass=NullPool,  # no long-lived pooled handles
                 connect_args={"check_same_thread": False},
             )
             DatabaseConfig._ro_engines[self.alias] = eng
@@ -221,20 +230,30 @@ class DatabaseConfig:
             Callers are responsible for cache invalidation and UI feedback.
         """
         sync_start = perf_counter()
-        logger.info("-"*40)
-        logger.info(f"sync() starting for {self.alias} at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("-" * 40)
+        logger.info(
+            f"sync() starting for {self.alias} at {
+                datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            }"
+        )
 
         with _SYNC_LOCK:
             self._dispose_local_connections()
             logger.debug("Disposing local connections and syncing database...")
             conn = None
             try:
-                conn = libsql.connect(self.path, sync_url=self.turso_url, auth_token=self.token)
+                conn = libsql.connect(
+                    self.path, sync_url=self.turso_url, auth_token=self.token
+                )
                 conn.sync()
                 sync_end = perf_counter()
-                sync_time = round((sync_end - sync_start)*1000, 2)
-                logger.info(f"sync() completed for {self.alias} in {sync_time} ms at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
-                logger.info("-"*40)
+                sync_time = round((sync_end - sync_start) * 1000, 2)
+                logger.info(
+                    f"sync() completed for {self.alias} in {sync_time} ms at {
+                        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                    }"
+                )
+                logger.info("-" * 40)
             except Exception as e:
                 logger.error(f"Database sync failed: {e}")
                 raise
@@ -254,36 +273,62 @@ class DatabaseConfig:
 
             return ok
 
-    def validate_sync(self)-> bool:
+    def validate_sync(self) -> bool:
         alias = self.alias
         with self.remote_engine.connect() as conn:
-            result = conn.execute(text("SELECT MAX(last_update) FROM marketstats")).fetchone()
-            remote_last_update = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S.%f').replace(tzinfo=timezone.utc)
+            result = conn.execute(
+                text("SELECT MAX(last_update) FROM marketstats")
+            ).fetchone()
+            remote_last_update = datetime.strptime(
+                result[0], "%Y-%m-%d %H:%M:%S.%f"
+            ).replace(tzinfo=timezone.utc)
             conn.close()
         with self.engine.connect() as conn:
-            result = conn.execute(text("SELECT MAX(last_update) FROM marketstats")).fetchone()
-            local_last_update = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S.%f').replace(tzinfo=timezone.utc)
+            result = conn.execute(
+                text("SELECT MAX(last_update) FROM marketstats")
+            ).fetchone()
+            local_last_update = datetime.strptime(
+                result[0], "%Y-%m-%d %H:%M:%S.%f"
+            ).replace(tzinfo=timezone.utc)
             conn.close()
-        logger.info("-"*40)
+        logger.info("-" * 40)
         logger.info(f"alias: {alias} validate_sync()")
         timestamp = datetime.now(tz=timezone.utc)
-        local_timestamp = datetime.now(tz=ZoneInfo('US/Eastern'))
-        logger.info(f"time: {local_timestamp.strftime('%Y-%m-%d %H:%M:%S')} (local); {timestamp.strftime('%Y-%m-%d %H:%M:%S')} (utc)")
-        logger.info(f"REMOTE LAST UPDATE: {remote_last_update.strftime('%Y-%m-%d %H:%M')} | Minutes ago: {round((timestamp-remote_last_update).total_seconds() / 60, 0)}")
-        logger.info(f"LOCAL LAST UPDATE: {local_last_update.strftime('%Y-%m-%d %H:%M')} | Minutes ago: {round((timestamp-local_last_update).total_seconds() / 60, 0)}")
-        logger.info("-"*40)
+        local_timestamp = datetime.now(tz=ZoneInfo("US/Eastern"))
+        logger.info(
+            f"time: {local_timestamp.strftime('%Y-%m-%d %H:%M:%S')} (local); {
+                timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            } (utc)"
+        )
+        logger.info(
+            f"REMOTE LAST UPDATE: {
+                remote_last_update.strftime('%Y-%m-%d %H:%M')
+            } | Minutes ago: {
+                round((timestamp - remote_last_update).total_seconds() / 60, 0)
+            }"
+        )
+        logger.info(
+            f"LOCAL LAST UPDATE: {
+                local_last_update.strftime('%Y-%m-%d %H:%M')
+            } | Minutes ago: {
+                round((timestamp - local_last_update).total_seconds() / 60, 0)
+            }"
+        )
+        logger.info("-" * 40)
         validation_test = remote_last_update == local_last_update
         logger.info(f"validation_test: {validation_test}")
         return validation_test
 
-    def get_table_list(self, local_only: bool = True)-> list[tuple]:
+    def get_table_list(self, local_only: bool = True) -> list[tuple]:
         if local_only:
             engine = self.engine
             with engine.connect() as conn:
                 stmt = text("PRAGMA table_list")
                 result = conn.execute(stmt)
                 tables = result.fetchall()
-                table_list = [table.name for table in tables if "sqlite" not in table.name]
+                table_list = [
+                    table.name for table in tables if "sqlite" not in table.name
+                ]
                 conn.close()
                 return table_list
         else:
@@ -292,11 +337,15 @@ class DatabaseConfig:
                 stmt = text("PRAGMA table_list")
                 result = conn.execute(stmt)
                 tables = result.fetchall()
-                table_list = [table.name for table in tables if "sqlite" not in table.name]
+                table_list = [
+                    table.name for table in tables if "sqlite" not in table.name
+                ]
                 conn.close()
                 return table_list
 
-    def get_table_columns(self, table_name: str, local_only: bool = True, full_info: bool = False) -> list[dict]:
+    def get_table_columns(
+        self, table_name: str, local_only: bool = True, full_info: bool = False
+    ) -> list[dict]:
         """
         Get column information for a specific table.
 
@@ -320,20 +369,22 @@ class DatabaseConfig:
             if full_info:
                 column_info = []
                 for col in columns:
-                    column_info.append({
-                    "cid": col.cid,
-                    "name": col.name,
-                    "type": col.type,
-                    "notnull": col.notnull,
-                    "dflt_value": col.dflt_value,
-                    "pk": col.pk
-                })
+                    column_info.append(
+                        {
+                            "cid": col.cid,
+                            "name": col.name,
+                            "type": col.type,
+                            "notnull": col.notnull,
+                            "dflt_value": col.dflt_value,
+                            "pk": col.pk,
+                        }
+                    )
             else:
                 column_info = [col.name for col in columns]
             conn.close()
             return column_info
 
-    def get_most_recent_update(self, table_name: str, remote: bool = False)-> datetime:
+    def get_most_recent_update(self, table_name: str, remote: bool = False) -> datetime:
         """
         Get the most recent update time for a specific table
         Args:
@@ -348,21 +399,32 @@ class DatabaseConfig:
         engine = self.remote_engine if remote else self.engine
         session = Session(bind=engine)
         with session.begin():
-            updates = select(UpdateLog.timestamp).where(UpdateLog.table_name == table_name).order_by(UpdateLog.timestamp.desc())
+            updates = (
+                select(UpdateLog.timestamp)
+                .where(UpdateLog.table_name == table_name)
+                .order_by(UpdateLog.timestamp.desc())
+            )
             result = session.execute(updates).fetchone()
             update_time = result[0] if result is not None else None
-            update_time = update_time.replace(tzinfo=timezone.utc) if update_time is not None else None
+            update_time = (
+                update_time.replace(tzinfo=timezone.utc)
+                if update_time is not None
+                else None
+            )
         session.close()
         engine.dispose()
         return update_time
 
-    def get_time_since_update(self, table_name: str = "marketstats", remote: bool = False):
+    def get_time_since_update(
+        self, table_name: str = "marketstats", remote: bool = False
+    ):
         status = self.get_most_recent_update(table_name, remote=remote)
         now = datetime.now(tz=timezone.utc)
         time_since = now - status
         logger.info(f"update_time: {status.strftime('%Y-%m-%d %H:%M')}")
         logger.info(f"time_since: {round(time_since.total_seconds() / 60, 1)} minutes")
         return time_since if time_since is not None else None
+
 
 if __name__ == "__main__":
     pass
