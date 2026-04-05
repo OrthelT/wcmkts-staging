@@ -22,6 +22,7 @@ from pages.components.market_components import (
 from pages.components.dashboard_components import (
     MINERAL_TYPE_IDS,
     ISOTOPE_AND_FUEL_BLOCK_TYPE_IDS,
+    ISOTOPE_TYPE_IDS,
     render_comparison_table,
     render_doctrine_ships_table,
     render_popular_modules_table,
@@ -84,37 +85,22 @@ def _navigate_to_doctrine_status(type_id: int):
     st.switch_page("pages/doctrine_status.py", query_params={"ship_id": str(type_id)})
 
 
-def _render_commodity_grid(market_service, price_service, sde_repo, doctrine_repo, language_code):
-    """Render the 2x2 commodity table grid with clickable rows."""
-    top_row = st.columns(2, gap="small")
-    with top_row[0]:
-        selected = render_comparison_table(
-            market_service=market_service,
-            price_service=price_service,
-            sde_repo=sde_repo,
-            type_ids=list(MINERAL_TYPE_IDS),
-            title_key="market_stats.mineral_price_comparison",
-            language_code=language_code,
-            dataframe_key="dash_minerals",
-        )
-        if selected:
-            _navigate_to_market_stats(selected)
+def _render_commodity_grid(
+    market_service, price_service, sde_repo, doctrine_repo, language_code,
+    market_key: str = "primary",
+):
+    """Render the commodity table grid with clickable rows.
 
-    with top_row[1]:
-        selected = render_comparison_table(
-            market_service=market_service,
-            price_service=price_service,
-            sde_repo=sde_repo,
-            type_ids=list(ISOTOPE_AND_FUEL_BLOCK_TYPE_IDS),
-            title_key="market_stats.isotope_and_fuel_block_comparison",
-            language_code=language_code,
-            dataframe_key="dash_isotopes",
-        )
-        if selected:
-            _navigate_to_market_stats(selected)
+    For the VSJ (deployment) market, the layout is tailored:
+    - No minerals table
+    - Ships and modules filtered to doctrine_id 991
+    - Isotopes/fuel blocks moved below ships and modules
+    """
+    is_vsj = market_key == "deployment"
+    vsj_doctrine_id = 991 if is_vsj else None
 
-    bottom_row = st.columns(2, gap="small")
-    with bottom_row[0]:
+    if is_vsj:
+        # VSJ layout: single column — ships, modules, then isotopes
         ship_id, target = render_doctrine_ships_table(
             doctrine_repo=doctrine_repo,
             market_service=market_service,
@@ -122,22 +108,94 @@ def _render_commodity_grid(market_service, price_service, sde_repo, doctrine_rep
             sde_repo=sde_repo,
             language_code=language_code,
             dataframe_key="dash_doctrine_ships",
+            doctrine_id=vsj_doctrine_id,
+            title_override="WC Siege \u2014 Stock vs Targets",
         )
         if ship_id and target == "market_stats":
             _navigate_to_market_stats(ship_id)
         elif ship_id and target == "doctrine_status":
             _navigate_to_doctrine_status(ship_id)
-    with bottom_row[1]:
+
         selected = render_popular_modules_table(
             market_service=market_service,
             price_service=price_service,
             doctrine_repo=doctrine_repo,
             sde_repo=sde_repo,
             language_code=language_code,
+            n=0,
             dataframe_key="dash_popular_modules",
+            doctrine_id=vsj_doctrine_id,
+            title_override="Modules",
+            show_ship_filter=True,
         )
         if selected:
             _navigate_to_market_stats(selected)
+
+        selected = render_comparison_table(
+            market_service=market_service,
+            price_service=price_service,
+            sde_repo=sde_repo,
+            type_ids=list(ISOTOPE_TYPE_IDS),
+            title_key="dashboard.vsj_isotopes",
+            language_code=language_code,
+            dataframe_key="dash_isotopes",
+        )
+        if selected:
+            _navigate_to_market_stats(selected)
+    else:
+        # Default layout: 2x2 grid (minerals + isotopes top, ships + modules bottom)
+        top_row = st.columns(2, gap="small")
+        with top_row[0]:
+            selected = render_comparison_table(
+                market_service=market_service,
+                price_service=price_service,
+                sde_repo=sde_repo,
+                type_ids=list(MINERAL_TYPE_IDS),
+                title_key="market_stats.mineral_price_comparison",
+                language_code=language_code,
+                dataframe_key="dash_minerals",
+            )
+            if selected:
+                _navigate_to_market_stats(selected)
+
+        with top_row[1]:
+            selected = render_comparison_table(
+                market_service=market_service,
+                price_service=price_service,
+                sde_repo=sde_repo,
+                type_ids=list(ISOTOPE_AND_FUEL_BLOCK_TYPE_IDS),
+                title_key="market_stats.isotope_and_fuel_block_comparison",
+                language_code=language_code,
+                dataframe_key="dash_isotopes",
+            )
+            if selected:
+                _navigate_to_market_stats(selected)
+
+        bottom_row = st.columns(2, gap="small")
+        with bottom_row[0]:
+            ship_id, target = render_doctrine_ships_table(
+                doctrine_repo=doctrine_repo,
+                market_service=market_service,
+                price_service=price_service,
+                sde_repo=sde_repo,
+                language_code=language_code,
+                dataframe_key="dash_doctrine_ships",
+            )
+            if ship_id and target == "market_stats":
+                _navigate_to_market_stats(ship_id)
+            elif ship_id and target == "doctrine_status":
+                _navigate_to_doctrine_status(ship_id)
+        with bottom_row[1]:
+            selected = render_popular_modules_table(
+                market_service=market_service,
+                price_service=price_service,
+                doctrine_repo=doctrine_repo,
+                sde_repo=sde_repo,
+                language_code=language_code,
+                dataframe_key="dash_popular_modules",
+            )
+            if selected:
+                _navigate_to_market_stats(selected)
 
 
 # =============================================================================
@@ -178,9 +236,10 @@ def main():
     _render_kpi_bar(market_service, language_code)
     st.divider()
 
-    # Section 2: Commodity Tables (2x2 grid)
+    # Section 2: Commodity Tables (2x2 grid, or tailored layout for VSJ)
     _render_commodity_grid(
         market_service, price_service, sde_repo, doctrine_repo, language_code,
+        market_key=market.key,
     )
     st.divider()
 

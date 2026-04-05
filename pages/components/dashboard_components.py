@@ -27,6 +27,9 @@ MINERAL_TYPE_IDS: tuple[int, ...] = (34, 35, 36, 37, 38, 39, 40, 11399, 81143)
 ISOTOPE_AND_FUEL_BLOCK_TYPE_IDS: tuple[int, ...] = (
     16274, 17887, 17888, 17889, 4247, 4312, 4051, 4246, 16273, 16275
 )
+ISOTOPE_TYPE_IDS: tuple[int, ...] = (
+    16274, 17887, 17888, 17889, 16273, 16275
+)
 
 # =========================================================================
 # Helpers
@@ -219,21 +222,75 @@ def render_comparison_table(
 # =========================================================================
 
 
-def get_popular_module_type_ids(doctrine_repo, n: int = 10) -> list[int]:
-    """Return top N module type_ids by avg_vol from doctrine fits.
+def _get_doctrine_fit_ids(doctrine_repo, doctrine_id: int) -> list[int]:
+    """Return fit_ids belonging to a specific doctrine_id."""
+    comps = doctrine_repo.get_all_doctrine_compositions()
+    if comps.empty:
+        return []
+    return comps[comps["doctrine_id"] == doctrine_id]["fit_id"].unique().tolist()
+
+
+def _get_doctrine_modules_df(
+    doctrine_repo, doctrine_id: int | None = None,
+) -> pd.DataFrame:
+    """Return the filtered modules DataFrame from doctrine fits.
 
     Filters to category_id 7 (Modules) and excludes ship hull rows.
+    When doctrine_id is provided, only considers fits belonging to that doctrine.
     """
     fits_df = doctrine_repo.get_all_fits()
     if fits_df.empty:
-        return []
-    modules = fits_df[
+        return pd.DataFrame()
+    if doctrine_id is not None:
+        valid_fit_ids = _get_doctrine_fit_ids(doctrine_repo, doctrine_id)
+        fits_df = fits_df[fits_df["fit_id"].isin(valid_fit_ids)]
+        if fits_df.empty:
+            return pd.DataFrame()
+    return fits_df[
         (fits_df["type_id"] != fits_df["ship_id"]) & (fits_df["category_id"] == 7)
     ].copy()
+
+
+def get_popular_module_type_ids(
+    doctrine_repo, n: int = 10, doctrine_id: int | None = None,
+) -> list[int]:
+    """Return top N module type_ids by avg_vol from doctrine fits.
+
+    Filters to category_id 7 (Modules) and excludes ship hull rows.
+    When doctrine_id is provided, only considers fits belonging to that doctrine.
+    """
+    modules = _get_doctrine_modules_df(doctrine_repo, doctrine_id)
+    if modules.empty:
+        return []
     modules = modules.sort_values("avg_vol", ascending=False).drop_duplicates(
         subset=["type_id"], keep="first"
     )
-    return modules.head(n)["type_id"].tolist()
+    if n > 0:
+        modules = modules.head(n)
+    return modules["type_id"].tolist()
+
+
+def _build_module_ship_map(
+    doctrine_repo, doctrine_id: int | None = None,
+) -> dict[int, list[str]]:
+    """Return mapping of module type_id → sorted list of ship_names that use it."""
+    modules_df = _get_doctrine_modules_df(doctrine_repo, doctrine_id)
+    if modules_df.empty:
+        return {}
+    grouped = modules_df.groupby("type_id")["ship_name"].apply(
+        lambda s: sorted(s.unique().tolist())
+    )
+    return grouped.to_dict()
+
+
+def _get_doctrine_ship_names(
+    doctrine_repo, doctrine_id: int | None = None,
+) -> list[str]:
+    """Return sorted list of unique ship names in a doctrine."""
+    modules_df = _get_doctrine_modules_df(doctrine_repo, doctrine_id)
+    if modules_df.empty:
+        return []
+    return sorted(modules_df["ship_name"].unique().tolist())
 
 
 def render_popular_modules_table(
@@ -244,15 +301,29 @@ def render_popular_modules_table(
     language_code: str,
     n: int = 10,
     dataframe_key: str | None = None,
+    doctrine_id: int | None = None,
+    title_override: str | None = None,
+    show_ship_filter: bool = False,
 ) -> int | None:
     """Render popular modules demand & pricing table.
+
+    Args:
+        doctrine_id: When provided, only show modules from fits in this doctrine.
+        title_override: When provided, use this as the section heading instead of the i18n key.
+        show_ship_filter: When True, add a ship name filter and a "used_by" column
+            showing which ships use each module.
 
     Returns:
         Selected type_id if a row was clicked, None otherwise.
     """
-    type_ids = get_popular_module_type_ids(doctrine_repo, n)
+    type_ids = get_popular_module_type_ids(doctrine_repo, n, doctrine_id=doctrine_id)
     if not type_ids:
         return None
+
+    # Build module→ships mapping when doctrine_id filtering is active
+    module_ship_map: dict[int, list[str]] = {}
+    if show_ship_filter and doctrine_id is not None:
+        module_ship_map = _build_module_ship_map(doctrine_repo, doctrine_id)
 
     snapshot = market_service.get_current_market_snapshot(type_ids)
     if snapshot.empty:
@@ -270,28 +341,65 @@ def render_popular_modules_table(
         "jita_sell_price", "jita_buy_price", "pct_diff_vs_jita_sell",
     ])
 
+    # Add used_by column when ship mapping is available
+    if module_ship_map:
+        snapshot["used_by"] = snapshot["type_id"].map(
+            lambda tid: ", ".join(module_ship_map.get(int(tid), []))
+        )
+    else:
+        snapshot["used_by"] = ""
+
+    heading = title_override or translate_text(language_code, "dashboard.popular_modules")
+    st.subheader(heading, divider="gray")
+
+    # Ship filter — placed after the heading, before the table
+    if show_ship_filter and module_ship_map:
+        ship_names = _get_doctrine_ship_names(doctrine_repo, doctrine_id)
+        all_label = "All"
+        selected_ship = st.selectbox(
+            translate_text(language_code, "dashboard.filter_by_ship"),
+            [None] + ship_names,
+            format_func=lambda s: all_label if s is None else s,
+            key="dash_module_ship_filter",
+        )
+        if selected_ship is not None:
+            matching_type_ids = {
+                tid for tid, ships in module_ship_map.items()
+                if selected_ship in ships
+            }
+            snapshot = snapshot[snapshot["type_id"].isin(matching_type_ids)]
+            if snapshot.empty:
+                st.info(translate_text(language_code, "doctrine_status.no_filtered_fits"))
+                return None
+
     display_cols = [
         "image_url", "type_name", "current_sell_price", "order_volume",
         "jita_sell_price", "jita_buy_price", "pct_diff_vs_jita_sell",
     ]
+    if module_ship_map:
+        display_cols.append("used_by")
+
     display_df = snapshot[display_cols].copy()
     table_df = drop_localized_backup_columns(display_df)
     styled_table = table_df.style.map(
         _jita_diff_cell_style, subset=["pct_diff_vs_jita_sell"]
     )
 
-    st.subheader(
-        translate_text(language_code, "dashboard.popular_modules"), divider="gray",
+    col_config = get_market_comparison_column_config(
+        language_code, price_format="compact",
     )
+    if module_ship_map:
+        col_config["used_by"] = st.column_config.TextColumn(
+            translate_text(language_code, "dashboard.column_used_by"),
+            width="medium",
+        )
 
     if dataframe_key:
         st.caption(translate_text(language_code, "dashboard.hint_click_market_stats"))
         event = st.dataframe(
             styled_table,
             hide_index=True,
-            column_config=get_market_comparison_column_config(
-                language_code, price_format="compact",
-            ),
+            column_config=col_config,
             width="stretch",
             on_select="rerun",
             selection_mode="single-row",
@@ -302,9 +410,7 @@ def render_popular_modules_table(
         st.dataframe(
             styled_table,
             hide_index=True,
-            column_config=get_market_comparison_column_config(
-                language_code, price_format="compact",
-            ),
+            column_config=col_config,
             width="stretch",
         )
         return None
@@ -366,8 +472,14 @@ def render_doctrine_ships_table(
     sde_repo,
     language_code: str,
     dataframe_key: str | None = None,
+    doctrine_id: int | None = None,
+    title_override: str | None = None,
 ) -> tuple[int | None, str | None]:
     """Render doctrine ships stock vs targets table with dual navigation.
+
+    Args:
+        doctrine_id: When provided, only show fits belonging to this doctrine.
+        title_override: When provided, use this as the section heading instead of the i18n key.
 
     Returns:
         (type_id, target) where target is "market_stats" or "doctrine_status",
@@ -378,6 +490,12 @@ def render_doctrine_ships_table(
     fits_df = doctrine_repo.get_all_fits()
     if fits_df.empty:
         return None, None
+
+    if doctrine_id is not None:
+        valid_fit_ids = _get_doctrine_fit_ids(doctrine_repo, doctrine_id)
+        fits_df = fits_df[fits_df["fit_id"].isin(valid_fit_ids)]
+        if fits_df.empty:
+            return None, None
 
     # Apply module equivalents: recalculate fits_on_mkt using combined stock
     # across interchangeable modules (mirrors FitDataBuilder.apply_module_equivalents)
@@ -463,9 +581,8 @@ def render_doctrine_ships_table(
     ]
     display_df = result_df[display_cols].copy()
 
-    st.subheader(
-        translate_text(language_code, "dashboard.doctrine_ships"), divider="gray",
-    )
+    heading = title_override or translate_text(language_code, "dashboard.doctrine_ships")
+    st.subheader(heading, divider="gray")
 
     if dataframe_key:
         st.caption(

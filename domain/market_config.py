@@ -36,4 +36,4 @@ class MarketConfig:
     turso_secret_key: str
 
 
-DEFAULT_MARKET_KEY = "primary"
+DEFAULT_MARKET_KEY = "deployment"
