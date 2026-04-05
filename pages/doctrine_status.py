@@ -471,6 +471,7 @@ def main():
                             st.metric(
                                 label=translate_text(language_code, "low_stock.column_fits"),
                                 value=f"{int(fits)}",
+                                format="compact",
                                 delta=fits_delta,
                             )
                         else:
@@ -485,6 +486,7 @@ def main():
                             st.metric(
                                 label=translate_text(language_code, "doctrine_report.metric_total_hulls"),
                                 value=f"{int(hulls)}",
+                                format="compact",
                                 delta=hulls_delta,
                             )
                         else:
@@ -499,6 +501,7 @@ def main():
                             st.metric(
                                 label=translate_text(language_code, "doctrine_report.target"),
                                 value=f"{int(target)}",
+                                format="compact",
                             )
                         else:
                             st.metric(
@@ -511,6 +514,7 @@ def main():
                             st.metric(
                                 label=translate_text(language_code, "doctrine_report.column_total_cost"),
                                 value=f"{fit_cost}",
+                                format="compact",
                             )
                         else:
                             st.metric(
