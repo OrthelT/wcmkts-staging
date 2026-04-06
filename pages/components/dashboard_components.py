@@ -373,7 +373,7 @@ def render_popular_modules_table(
                 return None
 
     display_cols = [
-        "image_url", "type_name", "current_sell_price", "order_volume",
+        "image_url", "type_name", "order_volume", "current_sell_price",
         "jita_sell_price", "jita_buy_price", "pct_diff_vs_jita_sell",
     ]
     if module_ship_map:
@@ -636,8 +636,8 @@ def render_doctrine_ships_table(
     result_df["type_name"] = result_df["type_name"].fillna(result_df["type_id"].astype(str))
 
     display_cols = [
-        "image_url", "type_name", "fit_id", "current_sell_price", "order_volume",
-        "jita_sell_price", "ship_target", "fits_on_mkt", "_mkt", "_doc",
+        "image_url", "fit_id", "type_name", "order_volume", "fits_on_mkt", "ship_target", "current_sell_price",
+        "jita_sell_price", "_mkt", "_doc",
     ]
     display_df = result_df[display_cols].copy()
 
