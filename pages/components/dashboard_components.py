@@ -434,35 +434,34 @@ def _apply_equivalents_to_fits(fits_df: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         return fits_df
 
+    fits_df = fits_df.copy()
+
+    # --- Global equivalents pass ---
     try:
         from services.module_equivalents_service import get_module_equivalents_service
         equiv_service = get_module_equivalents_service()
         type_ids_with_equivs = equiv_service.get_type_ids_with_equivalents()
-        if not type_ids_with_equivs:
-            return fits_df
+
+        modules_to_update = (
+            fits_df[fits_df["type_id"].isin(type_ids_with_equivs)]["type_id"].unique()
+            if type_ids_with_equivs
+            else []
+        )
+
+        if len(modules_to_update) > 0:
+            aggregated_stocks = equiv_service.get_aggregated_stock(list(modules_to_update))
+            for type_id, total_stock in aggregated_stocks.items():
+                mask = fits_df["type_id"] == type_id
+                for idx in fits_df.loc[mask].index:
+                    fit_qty = fits_df.at[idx, "fit_qty"]
+                    if fit_qty > 0:
+                        fits_df.at[idx, "fits_on_mkt"] = total_stock // fit_qty
+                    else:
+                        fits_df.at[idx, "fits_on_mkt"] = total_stock
     except Exception:
-        return fits_df
+        pass
 
-    modules_to_update = fits_df[
-        fits_df["type_id"].isin(type_ids_with_equivs)
-    ]["type_id"].unique()
-
-    if len(modules_to_update) == 0:
-        return fits_df
-
-    fits_df = fits_df.copy()
-    aggregated_stocks = equiv_service.get_aggregated_stock(list(modules_to_update))
-
-    for type_id, total_stock in aggregated_stocks.items():
-        mask = fits_df["type_id"] == type_id
-        for idx in fits_df.loc[mask].index:
-            fit_qty = fits_df.at[idx, "fit_qty"]
-            if fit_qty > 0:
-                fits_df.at[idx, "fits_on_mkt"] = total_stock // fit_qty
-            else:
-                fits_df.at[idx, "fits_on_mkt"] = total_stock
-
-    # Fit-scoped equivalents pass
+    # --- Fit-scoped equivalents pass (runs independently of global) ---
     try:
         from services.module_equivalents_service import get_fit_module_equivalents_service
         fit_equiv_service = get_fit_module_equivalents_service()
@@ -481,7 +480,9 @@ def _apply_equivalents_to_fits(fits_df: pd.DataFrame) -> pd.DataFrame:
                 if len(fit_modules) == 0:
                     continue
 
-                fit_agg = fit_equiv_service.get_fit_aggregated_stock(int(fid), list(fit_modules))
+                fit_agg = fit_equiv_service.get_fit_aggregated_stock(
+                    int(fid), list(fit_modules)
+                )
                 for tid, total_stock in fit_agg.items():
                     row_mask = (fits_df["fit_id"] == fid) & (fits_df["type_id"] == tid)
                     for idx in fits_df.loc[row_mask].index:

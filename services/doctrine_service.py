@@ -376,6 +376,7 @@ class FitDataBuilder:
             self._end_step("apply_module_equivalents")
             return self
 
+        # --- Global equivalents pass ---
         try:
             from services.module_equivalents_service import (
                 get_module_equivalents_service,
@@ -384,59 +385,65 @@ class FitDataBuilder:
             equiv_service = get_module_equivalents_service()
             type_ids_with_equivalents = equiv_service.get_type_ids_with_equivalents()
 
-            if not type_ids_with_equivalents:
-                self._logger.debug("No module equivalents configured")
-                self._end_step("apply_module_equivalents")
-                return self
-
-            # Find modules in raw data that have equivalents
-            modules_to_update = self._raw_df[
-                self._raw_df["type_id"].isin(type_ids_with_equivalents)
-            ]["type_id"].unique()
-
-            if len(modules_to_update) == 0:
-                self._logger.debug("No modules in fits have equivalents")
-                self._end_step("apply_module_equivalents")
-                return self
-
-            self._logger.info(
-                f"Applying equivalents for {len(modules_to_update)} modules"
+            modules_to_update = (
+                self._raw_df[
+                    self._raw_df["type_id"].isin(type_ids_with_equivalents)
+                ]["type_id"].unique()
+                if type_ids_with_equivalents
+                else []
             )
 
-            # Preserve original fits_on_mkt for low-stock ranking
-            if "own_fits_on_mkt" not in self._raw_df.columns:
-                self._raw_df["own_fits_on_mkt"] = self._raw_df["fits_on_mkt"]
-
-            # Get aggregated stock and lowest prices for modules with equivalents
-            modules_list = list(modules_to_update)
-            aggregated_stocks = equiv_service.get_aggregated_stock(modules_list)
-            lowest_prices = equiv_service.get_lowest_equivalent_prices(modules_list)
-
-            # Update fits_on_mkt and price for each module with equivalents
-            for type_id, total_stock in aggregated_stocks.items():
-                mask = self._raw_df["type_id"] == type_id
-
-                # Update stock
-                self._raw_df.loc[mask, "total_stock"] = total_stock
-
-                # Calculate fits_on_mkt per row — fit_qty varies across fits
-                for idx in self._raw_df.loc[mask].index:
-                    fit_qty = self._raw_df.at[idx, "fit_qty"]
-                    if fit_qty > 0:
-                        self._raw_df.at[idx, "fits_on_mkt"] = total_stock // fit_qty
-                    else:
-                        self._raw_df.at[idx, "fits_on_mkt"] = total_stock
-
-                # Use lowest equivalent price for cost calculation
-                if type_id in lowest_prices:
-                    self._raw_df.loc[mask, "price"] = lowest_prices[type_id]
-
-                self._logger.debug(
-                    f"Updated type_id {type_id}: total_stock={total_stock}, "
-                    f"price={lowest_prices.get(type_id, 'unchanged')}"
+            if len(modules_to_update) > 0:
+                self._logger.info(
+                    f"Applying equivalents for {len(modules_to_update)} modules"
                 )
 
-            # --- Fit-scoped equivalents pass ---
+                # Preserve original fits_on_mkt for low-stock ranking
+                if "own_fits_on_mkt" not in self._raw_df.columns:
+                    self._raw_df["own_fits_on_mkt"] = self._raw_df["fits_on_mkt"]
+
+                # Get aggregated stock and lowest prices for modules with equivalents
+                modules_list = list(modules_to_update)
+                aggregated_stocks = equiv_service.get_aggregated_stock(modules_list)
+                lowest_prices = equiv_service.get_lowest_equivalent_prices(
+                    modules_list
+                )
+
+                # Update fits_on_mkt and price for each module with equivalents
+                for type_id, total_stock in aggregated_stocks.items():
+                    mask = self._raw_df["type_id"] == type_id
+
+                    # Update stock
+                    self._raw_df.loc[mask, "total_stock"] = total_stock
+
+                    # Calculate fits_on_mkt per row — fit_qty varies across fits
+                    for idx in self._raw_df.loc[mask].index:
+                        fit_qty = self._raw_df.at[idx, "fit_qty"]
+                        if fit_qty > 0:
+                            self._raw_df.at[idx, "fits_on_mkt"] = (
+                                total_stock // fit_qty
+                            )
+                        else:
+                            self._raw_df.at[idx, "fits_on_mkt"] = total_stock
+
+                    # Use lowest equivalent price for cost calculation
+                    if type_id in lowest_prices:
+                        self._raw_df.loc[mask, "price"] = lowest_prices[type_id]
+
+                    self._logger.debug(
+                        f"Updated type_id {type_id}: total_stock={total_stock}, "
+                        f"price={lowest_prices.get(type_id, 'unchanged')}"
+                    )
+            else:
+                self._logger.debug("No global module equivalents to apply")
+
+        except ImportError:
+            self._logger.warning("Module equivalents service not available")
+        except Exception as e:
+            self._logger.error(f"Error applying global module equivalents: {e}")
+
+        # --- Fit-scoped equivalents pass (runs independently of global) ---
+        try:
             from services.module_equivalents_service import (
                 get_fit_module_equivalents_service,
             )
@@ -491,9 +498,9 @@ class FitDataBuilder:
                 )
 
         except ImportError:
-            self._logger.warning("Module equivalents service not available")
+            self._logger.warning("Fit module equivalents service not available")
         except Exception as e:
-            self._logger.error(f"Error applying module equivalents: {e}")
+            self._logger.error(f"Error applying fit-scoped equivalents: {e}")
 
         self._end_step("apply_module_equivalents")
         return self
