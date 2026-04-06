@@ -462,6 +462,37 @@ def _apply_equivalents_to_fits(fits_df: pd.DataFrame) -> pd.DataFrame:
             else:
                 fits_df.at[idx, "fits_on_mkt"] = total_stock
 
+    # Fit-scoped equivalents pass
+    try:
+        from services.module_equivalents_service import get_fit_module_equivalents_service
+        fit_equiv_service = get_fit_module_equivalents_service()
+
+        if "fit_id" in fits_df.columns:
+            for fid in fits_df["fit_id"].unique():
+                fit_type_ids = fit_equiv_service.get_fit_equiv_type_ids(int(fid))
+                if not fit_type_ids:
+                    continue
+
+                fit_modules = fits_df.loc[
+                    (fits_df["fit_id"] == fid) & fits_df["type_id"].isin(fit_type_ids),
+                    "type_id",
+                ].unique()
+
+                if len(fit_modules) == 0:
+                    continue
+
+                fit_agg = fit_equiv_service.get_fit_aggregated_stock(int(fid), list(fit_modules))
+                for tid, total_stock in fit_agg.items():
+                    row_mask = (fits_df["fit_id"] == fid) & (fits_df["type_id"] == tid)
+                    for idx in fits_df.loc[row_mask].index:
+                        fit_qty = fits_df.at[idx, "fit_qty"]
+                        if fit_qty > 0:
+                            fits_df.at[idx, "fits_on_mkt"] = total_stock // fit_qty
+                        else:
+                            fits_df.at[idx, "fits_on_mkt"] = total_stock
+    except Exception:
+        pass
+
     return fits_df
 
 

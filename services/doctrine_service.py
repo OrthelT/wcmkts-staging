@@ -436,6 +436,60 @@ class FitDataBuilder:
                     f"price={lowest_prices.get(type_id, 'unchanged')}"
                 )
 
+            # --- Fit-scoped equivalents pass ---
+            from services.module_equivalents_service import (
+                get_fit_module_equivalents_service,
+            )
+            fit_equiv_service = get_fit_module_equivalents_service()
+
+            for fid in self._raw_df["fit_id"].unique():
+                fit_type_ids = fit_equiv_service.get_fit_equiv_type_ids(int(fid))
+                if not fit_type_ids:
+                    continue
+
+                # Preserve original fits_on_mkt if not already done
+                if "own_fits_on_mkt" not in self._raw_df.columns:
+                    self._raw_df["own_fits_on_mkt"] = self._raw_df["fits_on_mkt"]
+
+                fit_modules = self._raw_df.loc[
+                    (self._raw_df["fit_id"] == fid)
+                    & self._raw_df["type_id"].isin(fit_type_ids),
+                    "type_id",
+                ].unique()
+
+                if len(fit_modules) == 0:
+                    continue
+
+                fit_agg = fit_equiv_service.get_fit_aggregated_stock(
+                    int(fid), list(fit_modules)
+                )
+                fit_prices = fit_equiv_service.get_fit_lowest_prices(
+                    int(fid), list(fit_modules)
+                )
+
+                for tid, total_stock in fit_agg.items():
+                    row_mask = (self._raw_df["fit_id"] == fid) & (
+                        self._raw_df["type_id"] == tid
+                    )
+                    self._raw_df.loc[row_mask, "total_stock"] = total_stock
+
+                    for idx in self._raw_df.loc[row_mask].index:
+                        fit_qty = self._raw_df.at[idx, "fit_qty"]
+                        if fit_qty > 0:
+                            self._raw_df.at[idx, "fits_on_mkt"] = (
+                                total_stock // fit_qty
+                            )
+                        else:
+                            self._raw_df.at[idx, "fits_on_mkt"] = total_stock
+
+                    if tid in fit_prices:
+                        self._raw_df.loc[row_mask, "price"] = fit_prices[tid]
+
+                self._logger.info(
+                    f"Applied fit-scoped equivalents for fit {fid}: "
+                    f"{len(fit_modules)} module(s)"
+                )
+
         except ImportError:
             self._logger.warning("Module equivalents service not available")
         except Exception as e:

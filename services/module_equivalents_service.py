@@ -427,6 +427,137 @@ def _get_all_equivalence_groups_cached(db_alias: str, _engine) -> list[Equivalen
 
 
 # =============================================================================
+# Fit-Scoped Module Equivalents Service
+# =============================================================================
+
+
+class FitModuleEquivalentsService:
+    """
+    Service for fit-scoped module equivalents.
+
+    Unlike the global ModuleEquivalentsService (faction modules with identical stats),
+    this handles modules that differ in stats but are acceptable substitutes
+    for a particular doctrine fit (e.g. T1/T2 variants).
+
+    No faction filter is applied — T1/T2 modules have metaGroupID 1/2.
+    """
+
+    def __init__(
+        self,
+        mkt_db: DatabaseConfig,
+        logger_instance: Optional[logging.Logger] = None,
+    ):
+        self._mkt_db = mkt_db
+        self._logger = logger_instance or logger
+
+    @classmethod
+    def create_default(cls, db_alias: str = None) -> "FitModuleEquivalentsService":
+        from settings_service import resolve_db_alias
+        db_alias = resolve_db_alias(db_alias)
+        return cls(DatabaseConfig(db_alias))
+
+    def get_fit_equiv_type_ids(self, fit_id: int) -> set[int]:
+        """Get all type_ids in fit-scoped groups for a given fit."""
+        groups = _get_fit_equiv_groups_cached(fit_id, self._mkt_db.alias, self._mkt_db.engine)
+        type_ids = set()
+        for group in groups:
+            type_ids.update(group.type_ids)
+        return type_ids
+
+    def get_fit_equiv_groups(self, fit_id: int) -> list[EquivalenceGroup]:
+        """Get full equivalence groups with stock data for a given fit."""
+        return _get_fit_equiv_groups_cached(fit_id, self._mkt_db.alias, self._mkt_db.engine)
+
+    def get_fit_aggregated_stock(self, fit_id: int, type_ids: list[int]) -> dict[int, int]:
+        """Get aggregated stock for type_ids that have fit-scoped equivalents."""
+        groups = self.get_fit_equiv_groups(fit_id)
+        if not groups:
+            return {}
+
+        # Build type_id -> group mapping
+        tid_to_group: dict[int, EquivalenceGroup] = {}
+        for group in groups:
+            for mod in group.modules:
+                tid_to_group[mod.type_id] = group
+
+        result = {}
+        for tid in type_ids:
+            group = tid_to_group.get(tid)
+            if group:
+                result[tid] = group.total_stock
+        return result
+
+    def get_fit_lowest_prices(self, fit_id: int, type_ids: list[int]) -> dict[int, float]:
+        """Get lowest in-stock equivalent price for fit-scoped equivalents."""
+        groups = self.get_fit_equiv_groups(fit_id)
+        if not groups:
+            return {}
+
+        tid_to_group: dict[int, EquivalenceGroup] = {}
+        for group in groups:
+            for mod in group.modules:
+                tid_to_group[mod.type_id] = group
+
+        result = {}
+        for tid in type_ids:
+            group = tid_to_group.get(tid)
+            if group and group.lowest_price > 0:
+                result[tid] = group.lowest_price
+        return result
+
+    def get_fit_equiv_group_for_type(self, fit_id: int, type_id: int) -> Optional[EquivalenceGroup]:
+        """Get the equivalence group containing type_id for a specific fit."""
+        groups = self.get_fit_equiv_groups(fit_id)
+        for group in groups:
+            if type_id in group.type_ids:
+                return group
+        return None
+
+
+@st.cache_resource(ttl=3600)
+def _get_fit_equiv_groups_cached(fit_id: int, db_alias: str, _engine) -> list[EquivalenceGroup]:
+    """Cached lookup of fit-scoped equivalence groups with stock data."""
+    query = text("""
+        SELECT fme.equiv_group_id, fme.type_id, fme.type_name,
+               COALESCE(ms.total_volume_remain, 0) as stock,
+               COALESCE(ms.price, 0) as price
+        FROM fit_module_equivalents fme
+        LEFT JOIN marketstats ms ON fme.type_id = ms.type_id
+        WHERE fme.fit_id = :fit_id
+        ORDER BY fme.equiv_group_id, fme.type_name
+    """)
+
+    try:
+        with _engine.connect() as conn:
+            df = pd.read_sql_query(query, conn, params={"fit_id": fit_id})
+
+        if df.empty:
+            return []
+
+        groups = {}
+        for _, row in df.iterrows():
+            group_id = int(row['equiv_group_id'])
+            if group_id not in groups:
+                groups[group_id] = []
+
+            groups[group_id].append(EquivalentModule(
+                type_id=int(row['type_id']),
+                type_name=row['type_name'],
+                stock=int(row['stock']) if pd.notna(row['stock']) else 0,
+                price=float(row['price']) if pd.notna(row['price']) else 0.0
+            ))
+
+        return [
+            EquivalenceGroup(equiv_group_id=gid, modules=mods)
+            for gid, mods in groups.items()
+        ]
+
+    except Exception as e:
+        logger.debug(f"Failed to get fit equiv groups for fit {fit_id}: {e}")
+        return []
+
+
+# =============================================================================
 # Streamlit Integration
 # =============================================================================
 
@@ -447,3 +578,16 @@ def get_module_equivalents_service() -> ModuleEquivalentsService:
     except ImportError:
         logger.debug("state module unavailable, creating new ModuleEquivalentsService instance")
         return ModuleEquivalentsService.create_default()
+
+
+def get_fit_module_equivalents_service() -> FitModuleEquivalentsService:
+    """Get or create a FitModuleEquivalentsService instance."""
+    try:
+        from state import get_service
+        from state.market_state import get_active_market_key
+        return get_service(
+            f'fit_module_equivalents_service_{get_active_market_key()}',
+            FitModuleEquivalentsService.create_default,
+        )
+    except ImportError:
+        return FitModuleEquivalentsService.create_default()

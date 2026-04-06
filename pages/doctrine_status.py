@@ -362,6 +362,15 @@ def main():
         except Exception:
             pass
 
+        # Add fit-scoped equiv type_ids
+        try:
+            from services.module_equivalents_service import get_fit_module_equivalents_service
+            _fit_equiv_service = get_fit_module_equivalents_service()
+            for fid in filtered_df["fit_id"].unique():
+                type_ids_with_equivs |= _fit_equiv_service.get_fit_equiv_type_ids(int(fid))
+        except Exception:
+            pass
+
     # Pre-fetch equivalence group breakdowns for modules in lowest_modules.
     # Only include groups where at least one *other* equivalent has stock.
     if _use_equiv and type_ids_with_equivs:
@@ -376,6 +385,24 @@ def main():
                 others_in_stock = [m for m in group.modules if m.stock > 0 and m.type_id != tid]
                 if others_in_stock:
                     equiv_groups[tid] = group
+
+        # Also check fit-scoped groups for any unmatched type_ids
+        try:
+            for _, row in filtered_df.iterrows():
+                fid = row.get("fit_id")
+                if fid is None:
+                    continue
+                for mod in row.get("lowest_modules", []):
+                    tid = mod["type_id"]
+                    if tid in equiv_groups:
+                        continue  # Already have a group from global
+                    fit_group = _fit_equiv_service.get_fit_equiv_group_for_type(int(fid), tid)
+                    if fit_group:
+                        others_in_stock = [m for m in fit_group.modules if m.stock > 0 and m.type_id != tid]
+                        if others_in_stock:
+                            equiv_groups[tid] = fit_group
+        except Exception:
+            pass
 
     # Group the data by ship_group
     grouped_fits = display_df.groupby("ship_group")

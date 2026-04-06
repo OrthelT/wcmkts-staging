@@ -196,6 +196,13 @@ def display_low_stock_modules(
             if SettingsService().use_equivalents:
                 equiv_svc = get_module_equivalents_service()
                 type_ids_with_equivs = equiv_svc.get_type_ids_with_equivalents()
+
+                # Add fit-scoped equiv type_ids
+                from services.module_equivalents_service import get_fit_module_equivalents_service
+                _fit_equiv_svc = get_fit_module_equivalents_service()
+                if "fit_id" in doctrine_modules.columns:
+                    for fid in doctrine_modules["fit_id"].unique():
+                        type_ids_with_equivs |= _fit_equiv_svc.get_fit_equiv_type_ids(int(fid))
         except Exception:
             pass
 
