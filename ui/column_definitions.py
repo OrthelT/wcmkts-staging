@@ -296,15 +296,15 @@ def get_doctrine_ships_column_config(language_code: str = "en") -> dict:
     return {
         "image_url": st.column_config.ImageColumn(
             "",
-            width=40,
+            width=30,
         ),
         "type_name": st.column_config.TextColumn(
             translate_text(language_code, "common.item"),
-            width=135,
+            width=75
         ),
         "fit_id": st.column_config.NumberColumn(
             translate_text(language_code, "doctrine_report.fit_id"),
-            width=50,
+            width=30,
         ),
         "current_sell_price": st.column_config.NumberColumn(
             translate_text(language_code, "market_stats.sell_price"),
@@ -313,8 +313,8 @@ def get_doctrine_ships_column_config(language_code: str = "en") -> dict:
         ),
         "order_volume": st.column_config.NumberColumn(
             translate_text(language_code, "market_stats.market_stock"),
-            format="compact",
-            width=40,
+            format="localized",
+            width=30,
         ),
         "jita_sell_price": st.column_config.NumberColumn(
             translate_text(language_code, "import_helper.column_jita_sell"),
@@ -323,11 +323,13 @@ def get_doctrine_ships_column_config(language_code: str = "en") -> dict:
         ),
         "ship_target": st.column_config.NumberColumn(
             translate_text(language_code, "dashboard.column_target"),
-            width=50,
+            width=40,
+            format="localized",
         ),
         "fits_on_mkt": st.column_config.NumberColumn(
             translate_text(language_code, "dashboard.column_fits_available"),
-            width=70,
+            width=40,
+            format="localized"
         ),
         "_mkt": st.column_config.CheckboxColumn(
             "📈",
