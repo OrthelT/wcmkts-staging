@@ -467,10 +467,21 @@ def _apply_equivalents_to_fits(fits_df: pd.DataFrame) -> pd.DataFrame:
         fit_equiv_service = get_fit_module_equivalents_service()
 
         if "fit_id" in fits_df.columns:
-            for fid in fits_df["fit_id"].unique():
+            all_fit_ids = fits_df["fit_id"].unique()
+            logger.debug(
+                "Dashboard fit-scoped equiv pass: checking %d fit_ids",
+                len(all_fit_ids),
+            )
+            for fid in all_fit_ids:
                 fit_type_ids = fit_equiv_service.get_fit_equiv_type_ids(int(fid))
                 if not fit_type_ids:
                     continue
+
+                logger.debug(
+                    "Dashboard fit %s: fit_module_equivalents returned "
+                    "%d type_ids: %s",
+                    fid, len(fit_type_ids), fit_type_ids,
+                )
 
                 fit_modules = fits_df.loc[
                     (fits_df["fit_id"] == fid) & fits_df["type_id"].isin(fit_type_ids),
@@ -478,21 +489,38 @@ def _apply_equivalents_to_fits(fits_df: pd.DataFrame) -> pd.DataFrame:
                 ].unique()
 
                 if len(fit_modules) == 0:
+                    logger.debug(
+                        "Dashboard fit %s: no matching type_ids in fits_df",
+                        fid,
+                    )
                     continue
 
                 fit_agg = fit_equiv_service.get_fit_aggregated_stock(
                     int(fid), list(fit_modules)
                 )
+                logger.debug(
+                    "Dashboard fit %s: aggregated stock=%s", fid, fit_agg,
+                )
                 for tid, total_stock in fit_agg.items():
                     row_mask = (fits_df["fit_id"] == fid) & (fits_df["type_id"] == tid)
                     for idx in fits_df.loc[row_mask].index:
                         fit_qty = fits_df.at[idx, "fit_qty"]
+                        old_val = fits_df.at[idx, "fits_on_mkt"]
                         if fit_qty > 0:
                             fits_df.at[idx, "fits_on_mkt"] = total_stock // fit_qty
                         else:
                             fits_df.at[idx, "fits_on_mkt"] = total_stock
-    except Exception:
-        pass
+                        logger.debug(
+                            "Dashboard fit %s type_id %s: fits_on_mkt "
+                            "%s -> %s (total_stock=%s, fit_qty=%s)",
+                            fid, tid, old_val,
+                            fits_df.at[idx, "fits_on_mkt"],
+                            total_stock, fit_qty,
+                        )
+        else:
+            logger.debug("Dashboard: no fit_id column in fits_df")
+    except Exception as e:
+        logger.error("Dashboard fit-scoped equiv pass failed: %s", e, exc_info=True)
 
     return fits_df
 

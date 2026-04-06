@@ -173,6 +173,9 @@ class ModuleEquivalentsService:
         """
         Get the full equivalence group for a type_id with stock information.
 
+        Note: Returns None for non-faction modules (_is_faction guard).
+        For fit-scoped T1/T2 equivalents, use FitModuleEquivalentsService instead.
+
         Args:
             type_id: The EVE type ID to look up
 
@@ -180,6 +183,10 @@ class ModuleEquivalentsService:
             EquivalenceGroup with all modules and stock, or None if not found
         """
         if not self._is_faction(type_id):
+            self._logger.debug(
+                "get_equivalence_group(%s): skipped — not a faction module",
+                type_id,
+            )
             return None
         return _get_equivalence_group_cached(type_id, self._mkt_db.alias, self._mkt_db.engine)
 
@@ -274,6 +281,10 @@ class ModuleEquivalentsService:
         """
         Get all type_ids that have equivalents.
 
+        Note: Only queries the global module_equivalents table.
+        Fit-scoped equivalents (fit_module_equivalents) are handled
+        separately by FitModuleEquivalentsService.
+
         Returns:
             Set of type_ids that are part of an equivalence group
         """
@@ -282,8 +293,14 @@ class ModuleEquivalentsService:
         for group in groups:
             type_ids.update(group.type_ids)
         # Intersect with faction set if available
+        pre_filter_count = len(type_ids)
         if self._faction_type_ids is not None:
             type_ids &= self._faction_type_ids
+        if pre_filter_count != len(type_ids):
+            self._logger.debug(
+                "get_type_ids_with_equivalents: %d -> %d after faction filter",
+                pre_filter_count, len(type_ids),
+            )
         return type_ids
 
 
@@ -462,6 +479,10 @@ class FitModuleEquivalentsService:
         type_ids = set()
         for group in groups:
             type_ids.update(group.type_ids)
+        self._logger.debug(
+            "get_fit_equiv_type_ids(fit_id=%s): %d groups, %d type_ids: %s",
+            fit_id, len(groups), len(type_ids), type_ids if type_ids else "empty",
+        )
         return type_ids
 
     def get_fit_equiv_groups(self, fit_id: int) -> list[EquivalenceGroup]:
@@ -532,7 +553,18 @@ def _get_fit_equiv_groups_cached(fit_id: int, db_alias: str, _engine) -> list[Eq
             df = pd.read_sql_query(query, conn, params={"fit_id": fit_id})
 
         if df.empty:
+            logger.debug(
+                "fit_module_equivalents query returned empty for fit_id=%s "
+                "(db_alias=%s)",
+                fit_id, db_alias,
+            )
             return []
+
+        logger.debug(
+            "fit_module_equivalents query for fit_id=%s returned %d rows: "
+            "type_ids=%s",
+            fit_id, len(df), df['type_id'].tolist(),
+        )
 
         groups = {}
         for _, row in df.iterrows():
@@ -547,13 +579,22 @@ def _get_fit_equiv_groups_cached(fit_id: int, db_alias: str, _engine) -> list[Eq
                 price=float(row['price']) if pd.notna(row['price']) else 0.0
             ))
 
-        return [
+        result = [
             EquivalenceGroup(equiv_group_id=gid, modules=mods)
             for gid, mods in groups.items()
         ]
+        logger.debug(
+            "fit_module_equivalents for fit_id=%s: %d groups, stocks=%s",
+            fit_id, len(result),
+            {g.equiv_group_id: g.total_stock for g in result},
+        )
+        return result
 
     except Exception as e:
-        logger.debug(f"Failed to get fit equiv groups for fit {fit_id}: {e}")
+        logger.error(
+            "Failed to get fit equiv groups for fit %s: %s", fit_id, e,
+            exc_info=True,
+        )
         return []
 
 

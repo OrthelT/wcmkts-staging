@@ -355,21 +355,35 @@ def main():
 
     type_ids_with_equivs: set[int] = set()
     equiv_groups: dict = {}  # type_id -> EquivalenceGroup
+    _fit_equiv_service = None
     if _use_equiv:
         try:
             equiv_service = get_module_equivalents_service()
             type_ids_with_equivs = equiv_service.get_type_ids_with_equivalents()
-        except Exception:
-            pass
+            logger.debug(
+                "Global type_ids_with_equivs: %d ids", len(type_ids_with_equivs)
+            )
+        except Exception as e:
+            logger.error("Failed to get global equiv type_ids: %s", e)
 
         # Add fit-scoped equiv type_ids
         try:
             from services.module_equivalents_service import get_fit_module_equivalents_service
             _fit_equiv_service = get_fit_module_equivalents_service()
             for fid in filtered_df["fit_id"].unique():
-                type_ids_with_equivs |= _fit_equiv_service.get_fit_equiv_type_ids(int(fid))
-        except Exception:
-            pass
+                fit_tids = _fit_equiv_service.get_fit_equiv_type_ids(int(fid))
+                if fit_tids:
+                    logger.debug(
+                        "Fit %s: fit_module_equivalents returned %d type_ids: %s",
+                        fid, len(fit_tids), fit_tids,
+                    )
+                    type_ids_with_equivs |= fit_tids
+        except Exception as e:
+            logger.error("Failed to get fit-scoped equiv type_ids: %s", e)
+
+        logger.debug(
+            "Combined type_ids_with_equivs: %d ids", len(type_ids_with_equivs)
+        )
 
     # Pre-fetch equivalence group breakdowns for modules in lowest_modules.
     # Only include groups where at least one *other* equivalent has stock.
@@ -379,15 +393,28 @@ def main():
             for mod in row.get("lowest_modules", []):
                 if mod["type_id"] in type_ids_with_equivs:
                     equiv_type_ids_in_fits.add(mod["type_id"])
+
+        logger.debug(
+            "equiv_type_ids_in_fits (in lowest_modules): %s",
+            equiv_type_ids_in_fits,
+        )
+
+        # Try global groups first (only works for faction modules)
         for tid in equiv_type_ids_in_fits:
             group = equiv_service.get_equivalence_group(tid)
             if group:
                 others_in_stock = [m for m in group.modules if m.stock > 0 and m.type_id != tid]
                 if others_in_stock:
                     equiv_groups[tid] = group
+            else:
+                logger.debug(
+                    "Global get_equivalence_group(%s) returned None "
+                    "(likely filtered by _is_faction guard)",
+                    tid,
+                )
 
-        # Also check fit-scoped groups for any unmatched type_ids
-        try:
+        # Check fit-scoped groups for any unmatched type_ids
+        if _fit_equiv_service is not None:
             for _, row in filtered_df.iterrows():
                 fid = row.get("fit_id")
                 if fid is None:
@@ -396,13 +423,50 @@ def main():
                     tid = mod["type_id"]
                     if tid in equiv_groups:
                         continue  # Already have a group from global
-                    fit_group = _fit_equiv_service.get_fit_equiv_group_for_type(int(fid), tid)
+                    try:
+                        fit_group = _fit_equiv_service.get_fit_equiv_group_for_type(
+                            int(fid), tid
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "get_fit_equiv_group_for_type(%s, %s) failed: %s",
+                            fid, tid, e,
+                        )
+                        continue
                     if fit_group:
-                        others_in_stock = [m for m in fit_group.modules if m.stock > 0 and m.type_id != tid]
+                        others_in_stock = [
+                            m for m in fit_group.modules
+                            if m.stock > 0 and m.type_id != tid
+                        ]
                         if others_in_stock:
                             equiv_groups[tid] = fit_group
-        except Exception:
-            pass
+                            logger.debug(
+                                "Fit %s: added fit-scoped equiv group for "
+                                "type_id %s (%d modules, total_stock=%d)",
+                                fid, tid, len(fit_group.modules),
+                                fit_group.total_stock,
+                            )
+                        else:
+                            logger.debug(
+                                "Fit %s type_id %s: fit-scoped group found "
+                                "but no other equivalents have stock",
+                                fid, tid,
+                            )
+                    else:
+                        logger.debug(
+                            "Fit %s type_id %s: no fit-scoped equiv group",
+                            fid, tid,
+                        )
+        else:
+            logger.warning(
+                "Fit equiv service not available, skipping fit-scoped "
+                "equiv group lookup"
+            )
+
+        logger.debug(
+            "Final equiv_groups: %d entries, type_ids=%s",
+            len(equiv_groups), list(equiv_groups.keys()),
+        )
 
     # Group the data by ship_group
     grouped_fits = display_df.groupby("ship_group")
