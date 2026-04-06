@@ -46,11 +46,12 @@ pages = {
         ),
     ],
     translate_text(current_language, "nav.section.analysis_tools"): [
-        st.Page("pages/low_stock.py", title=translate_text(current_language, "nav.page.low_stock")),
-        st.Page(
-            "pages/import_helper.py",
-            title=translate_text(current_language, "nav.page.import_helper"),
-        ),
+
+        # st.Page("pages/low_stock.py", title=translate_text(current_language, "nav.page.low_stock")),
+        # st.Page(
+        #    "pages/import_helper.py",
+         #   title=translate_text(current_language, "nav.page.import_helper"),
+        # ),
         st.Page(
             "pages/doctrine_status.py",
             title=translate_text(current_language, "nav.page.doctrine_status"),
@@ -59,10 +60,11 @@ pages = {
             "pages/doctrine_report.py",
             title=translate_text(current_language, "nav.page.doctrine_report"),
         ),
-        st.Page(
-            "pages/build_costs.py",
-            title=translate_text(current_language, "nav.page.build_costs"),
-        ),
+        
+        # st.Page(
+        #    "pages/build_costs.py",
+        #    title=translate_text(current_language, "nav.page.build_costs"),
+      #  ),
         st.Page("pages/pricer.py", title=translate_text(current_language, "nav.page.pricer")),
     ],
     translate_text(current_language, "nav.section.data"): [
